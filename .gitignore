@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# uv cache (useful for sandboxed/CI environments)
+.uv-cache/

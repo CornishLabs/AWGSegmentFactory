@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
+import bisect
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,6 +32,7 @@ def interactive_grid_debug(
     fps: float = 200.0,
     title: str = "Crossed-AOD Grid Debug",
     annotate: bool = True,
+    show_segment_in_title: bool = True,
 ):
     """
     Jupyter interactive plot. Shows NxM traps as Cartesian product of H and V tones.
@@ -41,6 +43,10 @@ def interactive_grid_debug(
     if fy is None:
         fy = LinearFreqToPos(slope_hz_per_unit=1e6)  # MHz
 
+    # Allow passing ProgramIR directly for convenience.
+    if hasattr(tl, "to_timeline"):
+        tl = tl.to_timeline()  # type: ignore[assignment]
+
     times = tl.sample_times(fps=fps)
 
     import ipywidgets as widgets
@@ -49,6 +55,40 @@ def interactive_grid_debug(
     fig, ax = plt.subplots()
 
     out = widgets.Output()
+
+    def _axis_limits_for_plane(plane: str, f_to_pos: Callable[[np.ndarray], np.ndarray]) -> Tuple[float, float]:
+        spans = tl.planes.get(plane, [])
+        if not spans:
+            return (-1.0, 1.0)
+        freqs: list[np.ndarray] = []
+        for sp in spans:
+            freqs.append(sp.start.freqs_hz)
+            freqs.append(sp.end.freqs_hz)
+        f = np.concatenate([x for x in freqs if x.size], axis=0) if any(x.size for x in freqs) else np.zeros((0,))
+        if f.size == 0:
+            return (-1.0, 1.0)
+        x = f_to_pos(f)
+        xmin = float(np.min(x))
+        xmax = float(np.max(x))
+        if xmin == xmax:
+            m = 1.0 if xmin == 0.0 else abs(xmin) * 0.05
+        else:
+            m = 0.05 * (xmax - xmin)
+        return (xmin - m, xmax + m)
+
+    xlim = _axis_limits_for_plane(plane_h, fx)
+    ylim = _axis_limits_for_plane(plane_v, fy)
+
+    start_times = [t0 for (t0, _name) in tl.segment_starts]
+    start_names = [_name for (_t0, _name) in tl.segment_starts]
+
+    def _segment_name_at(t: float) -> str:
+        if not start_times:
+            return ""
+        i = bisect.bisect_right(start_times, t) - 1
+        if i < 0:
+            return start_names[0]
+        return start_names[min(i, len(start_names) - 1)]
 
     def render_frame(i: int):
         t = float(times[i])
@@ -64,18 +104,18 @@ def interactive_grid_debug(
         S = size_fn(sH.amps, sV.amps)
 
         ax.clear()
-        ax.set_title(f"{title} | t={t*1e3:.3f} ms")
+        if show_segment_in_title:
+            seg_name = _segment_name_at(t)
+            ax.set_title(f"{title} | {seg_name} | t={t*1e3:.3f} ms")
+        else:
+            ax.set_title(f"{title} | t={t*1e3:.3f} ms")
         ax.set_xlabel(f"{plane_h} position (arb)")
         ax.set_ylabel(f"{plane_v} position (arb)")
         ax.grid(True)
         ax.scatter(X, Y, s=S, marker='o')
 
-        # microns
-        X_LIM = (-60, 60)
-        Y_LIM = (-60, 60)
-
-        ax.set_xlim(*X_LIM)
-        ax.set_ylim(*Y_LIM)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
         ax.set_aspect("equal", adjustable="box")  # keeps geometry sensible
 
         if annotate:

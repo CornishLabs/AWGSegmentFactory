@@ -1,7 +1,11 @@
 from .builder import AWGProgramBuilder
+from .calibration import LinearPositionToFreqCalib
+from .program_ir import ProgramIR
 
 __all__ = [
     "AWGProgramBuilder",
+    "LinearPositionToFreqCalib",
+    "ProgramIR",
     "interactive_grid_debug",
     "LinearFreqToPos",
 ]

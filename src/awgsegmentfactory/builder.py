@@ -9,7 +9,8 @@ from .ir import (
     DefinitionSpec,
     HoldOp, UseDefOp, MoveOp, RampAmpToOp, RemapFromDefOp,
 )
-from .resolve import resolve_program
+from .program_ir import ProgramIR
+from .resolve import resolve_program, resolve_program_ir
 
 def _as_tuple_f(x: float | Sequence[float]) -> Tuple[float, ...]:
     if isinstance(x, (int, float)):
@@ -212,3 +213,7 @@ class AWGProgramBuilder:
     def build(self):
         spec = self.build_spec()
         return resolve_program(spec)
+
+    def build_ir(self) -> ProgramIR:
+        spec = self.build_spec()
+        return resolve_program_ir(spec)

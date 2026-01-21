@@ -1,9 +1,22 @@
 from __future__ import annotations
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple, Literal
+from typing import Dict, NewType, Optional, Sequence, Tuple, Literal
 
 SegmentMode = Literal["loop_n", "wait_trig", "once"]
 InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
+
+ToneId = NewType("ToneId", int)
+
+
+class PositionToFreqCalib(ABC):
+    """
+    Calibration interface: convert a requested position delta (e.g. µm) into a
+    frequency delta (Hz) for a given tone and axis.
+    """
+
+    @abstractmethod
+    def df_hz(self, tone_id: ToneId, dx_um: float, axis: str) -> float: ...
 
 @dataclass(frozen=True)
 class DefinitionSpec:

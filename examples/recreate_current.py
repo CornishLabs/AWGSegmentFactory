@@ -3,7 +3,7 @@ import numpy as np
 
 cal = LinearPositionToFreqCalib(slope_hz_per_um=250e3)  # example: 250 kHz / µm
 
-prog = (
+ir = (
     AWGProgramBuilder(sample_rate=625e6) # 625MHz
     .with_calibration("pos_to_df", cal)
     .plane("H")
@@ -91,13 +91,18 @@ prog = (
     .segment("wait_for_trigger_D", mode="wait_trig")
         .hold(time=200e-6)
 
-    .build()
+    .build_ir()
 )
 
 
-print(prog.summary())
-for seg in prog.segments:
-    print("\n---", seg.name, "---")
-    print("start tone ids:", [t.tone_id for t in seg.start.tones])
-    for p in seg.parts:
-        print(p.interp, p.duration_s, "start amps", [t.amp for t in p.start.tones])
+print(f"segments: {len(ir.segments)} | duration: {ir.duration_s*1e3:.3f} ms | fs={ir.sample_rate_hz/1e6:.1f} MHz")
+for seg in ir.segments:
+    print(f"\n--- {seg.name} --- mode={seg.mode} loop={seg.loop} samples={seg.n_samples}")
+    if not seg.parts:
+        continue
+    for i, part in enumerate(seg.parts):
+        plane_H = part.planes.get("H")
+        plane_V = part.planes.get("V")
+        h_desc = f"H:{plane_H.interp}" if plane_H is not None else "H:—"
+        v_desc = f"V:{plane_V.interp}" if plane_V is not None else "V:—"
+        print(f"part {i}: n={part.n_samples} ({part.n_samples/ir.sample_rate_hz*1e6:.2f} µs) {h_desc} {v_desc}")

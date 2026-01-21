@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
+from .ir import InterpKind, SegmentMode
+from .timeline import PlaneState, ResolvedTimeline, Span
+
+
+@dataclass(frozen=True)
+class PlanePartIR:
+    """Per-plane primitive for a single time interval (part)."""
+
+    start: PlaneState
+    end: PlaneState
+    interp: InterpKind
+    tau_s: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class PartIR:
+    """
+    A time interval with a fixed interpolation primitive per plane.
+
+    The compiler-friendly representation is:
+    - duration is stored as `n_samples` (integer)
+    - each plane has (start, end, interp, tau) describing parameter evolution
+    """
+
+    n_samples: int
+    planes: Dict[str, PlanePartIR]
+
+
+@dataclass(frozen=True)
+class SegmentIR:
+    name: str
+    mode: SegmentMode
+    loop: int
+    parts: Tuple[PartIR, ...]
+
+    @property
+    def n_samples(self) -> int:
+        return sum(p.n_samples for p in self.parts)
+
+
+@dataclass(frozen=True)
+class ProgramIR:
+    """
+    Resolved, segment-grouped IR intended for compilation into AWG sequence mode.
+
+    - `segments[i]` corresponds to a Spectrum "data segment" (pattern memory)
+    - `mode/loop` map onto Spectrum sequence step settings
+    - Each segment consists of primitive "parts" with integer sample lengths
+    """
+
+    sample_rate_hz: float
+    planes: Tuple[str, ...]
+    segments: Tuple[SegmentIR, ...]
+
+    @property
+    def n_samples(self) -> int:
+        return sum(s.n_samples for s in self.segments)
+
+    @property
+    def duration_s(self) -> float:
+        return self.n_samples / self.sample_rate_hz
+
+    def to_timeline(self) -> ResolvedTimeline:
+        spans: Dict[str, list[Span]] = {p: [] for p in self.planes}
+        segment_starts: list[tuple[float, str]] = []
+
+        fs = float(self.sample_rate_hz)
+        n0 = 0
+        for seg in self.segments:
+            segment_starts.append((n0 / fs, seg.name))
+            for part in seg.parts:
+                t0 = n0 / fs
+                t1 = (n0 + part.n_samples) / fs
+                for p in self.planes:
+                    pp = part.planes[p]
+                    spans[p].append(
+                        Span(
+                            t0=t0,
+                            t1=t1,
+                            start=pp.start,
+                            end=pp.end,
+                            interp=pp.interp,
+                            tau_s=pp.tau_s,
+                            seg_name=seg.name,
+                        )
+                    )
+                n0 += part.n_samples
+
+        return ResolvedTimeline(
+            sample_rate_hz=fs,
+            planes=spans,
+            segment_starts=segment_starts,
+            t_end=n0 / fs,
+        )
+

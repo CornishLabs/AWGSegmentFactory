@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import replace
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 import warnings
@@ -8,7 +7,8 @@ from .ir import (
     ProgramSpec, SegmentSpec, SegmentMode,
     HoldOp, UseDefOp, MoveOp, RampAmpToOp, RemapFromDefOp,
 )
-from .timeline import PlaneState, Span, ResolvedTimeline
+from .program_ir import ProgramIR, SegmentIR, PartIR, PlanePartIR
+from .timeline import PlaneState, ResolvedTimeline
 
 def _empty_state() -> PlaneState:
     return PlaneState(
@@ -23,6 +23,11 @@ def _round_to_samples(sample_rate_hz: float, time_s: float) -> float:
     dt = 1.0 / sample_rate_hz
     n = int(np.ceil(time_s / dt))
     return n * dt
+
+def _ceil_samples(sample_rate_hz: float, time_s: float) -> int:
+    if time_s <= 0:
+        return 0
+    return int(np.ceil(float(time_s) * float(sample_rate_hz)))
 
 def _snap_freqs_to_wrap(freqs_hz: np.ndarray, seg_len_s: float) -> np.ndarray:
     # wrap-continuous if f * seg_len_s is an integer number of cycles
@@ -39,19 +44,16 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
         raise IndexError(f"idxs out of range for n={n}: {idxs}")
     return idx
 
-def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
+def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
     fs = spec.sample_rate_hz
 
     # current per-plane state
     cur: Dict[str, PlaneState] = {p: _empty_state() for p in spec.planes}
-    spans: Dict[str, List[Span]] = {p: [] for p in spec.planes}
-
-    t = 0.0
-    segment_starts: List[tuple[float, str]] = []
+    segments: List[SegmentIR] = []
 
     for seg in spec.segments:
-        segment_starts.append((t, seg.name))
-        seg_time_accum = 0.0
+        parts: List[PartIR] = []
+        seg_samples = 0
 
         for op in seg.ops:
             if isinstance(op, UseDefOp):
@@ -87,18 +89,21 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 end = PlaneState(freqs_hz=tf, amps=ta, phases_rad=tp)
 
-                dt = _round_to_samples(fs, op.time_s)
-                if dt > 0:
+                n = _ceil_samples(fs, op.time_s)
+                if n > 0:
+                    planes: Dict[str, PlanePartIR] = {}
                     for p in spec.planes:
                         if p == op.plane:
-                            spans[p].append(
-                                Span(t, t + dt, PlaneState(sf, sa, sp), end, interp=op.kind, seg_name=seg.name)
+                            planes[p] = PlanePartIR(
+                                start=PlaneState(sf, sa, sp),
+                                end=end,
+                                interp=op.kind,
                             )
                         else:
                             st = cur[p]
-                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
-                    t += dt
-                    seg_time_accum += dt
+                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
+                    parts.append(PartIR(n_samples=n, planes=planes))
+                    seg_samples += n
                 cur[op.plane] = end
                 continue
 
@@ -112,16 +117,17 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 end = PlaneState(freqs_hz=f1, amps=start.amps.copy(), phases_rad=start.phases_rad.copy())
 
-                dt = _round_to_samples(fs, op.time_s)
-                if dt > 0:
+                n = _ceil_samples(fs, op.time_s)
+                if n > 0:
+                    planes: Dict[str, PlanePartIR] = {}
                     for p in spec.planes:
                         if p == op.plane:
-                            spans[p].append(Span(t, t + dt, start, end, interp=op.kind, seg_name=seg.name))
+                            planes[p] = PlanePartIR(start=start, end=end, interp=op.kind)
                         else:
                             st = cur[p]
-                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
-                    t += dt
-                    seg_time_accum += dt
+                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
+                    parts.append(PartIR(n_samples=n, planes=planes))
+                    seg_samples += n
                 cur[op.plane] = end
                 continue
 
@@ -143,33 +149,33 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 end = PlaneState(freqs_hz=start.freqs_hz.copy(), amps=a1, phases_rad=start.phases_rad.copy())
 
-                dt = _round_to_samples(fs, op.time_s)
-                if dt > 0:
+                n = _ceil_samples(fs, op.time_s)
+                if n > 0:
+                    planes: Dict[str, PlanePartIR] = {}
                     for p in spec.planes:
                         if p == op.plane:
-                            spans[p].append(
-                                Span(t, t + dt, start, end, interp=op.kind, tau_s=op.tau_s, seg_name=seg.name)
-                            )
+                            planes[p] = PlanePartIR(start=start, end=end, interp=op.kind, tau_s=op.tau_s)
                         else:
                             st = cur[p]
-                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
-                    t += dt
-                    seg_time_accum += dt
+                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
+                    parts.append(PartIR(n_samples=n, planes=planes))
+                    seg_samples += n
                 cur[op.plane] = end
                 continue
 
             if isinstance(op, HoldOp):
-                dt = _round_to_samples(fs, op.time_s)
-                if dt <= 0:
+                n = _ceil_samples(fs, op.time_s)
+                if n <= 0:
                     # user wants "cursor doesn't move", but segments must be >= 1 sample overall.
                     # so a hold(0) is a state-noop; allowed.
                     continue
+                dt_s = n / fs
 
                 # In wait_trig segments: snap frequencies to nearest wrap-continuous values
                 if seg.mode == "wait_trig":
                     for p in spec.planes:
                         st = cur[p]
-                        snapped = _snap_freqs_to_wrap(st.freqs_hz, dt)
+                        snapped = _snap_freqs_to_wrap(st.freqs_hz, dt_s)
                         df = np.max(np.abs(snapped - st.freqs_hz)) if st.freqs_hz.size else 0.0
                         if op.warn_df_hz is not None and df > op.warn_df_hz:
                             warnings.warn(
@@ -178,32 +184,29 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
                         cur[p] = PlaneState(snapped, st.amps.copy(), st.phases_rad.copy())
 
                 # Hold applies to all planes (continuous timeline)
-                for p in spec.planes:
-                    st = cur[p]
-                    spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
-                t += dt
-                seg_time_accum += dt
+                planes = {p: PlanePartIR(start=cur[p], end=cur[p], interp="hold") for p in spec.planes}
+                parts.append(PartIR(n_samples=n, planes=planes))
+                seg_samples += n
                 continue
 
             raise TypeError(f"Unknown op type: {type(op)}")
 
         # Enforce: every segment must be >= 1 sample long
-        min_seg = 1.0 / fs
-        if seg_time_accum < min_seg:
+        if seg_samples < 1:
+            min_seg = 1.0 / fs
             raise ValueError(
-                f"Segment '{seg.name}' has duration {seg_time_accum:.3g}s < 1 sample ({min_seg:.3g}s). "
+                f"Segment '{seg.name}' has duration {seg_samples / fs:.3g}s < 1 sample ({min_seg:.3g}s). "
                 "Add a hold() or a timed op so the segment is at least 1 sample long."
             )
 
-    # Make sure each plane has at least one span, for plotting convenience
-    for p in spec.planes:
-        if not spans[p]:
-            st = cur[p]
-            spans[p].append(Span(0.0, 1.0 / fs, st, st, interp="hold", seg_name="__dummy__"))
+        segments.append(SegmentIR(name=seg.name, mode=seg.mode, loop=seg.loop, parts=tuple(parts)))
 
-    return ResolvedTimeline(
+    return ProgramIR(
         sample_rate_hz=fs,
-        planes=spans,
-        segment_starts=segment_starts,
-        t_end=t,
+        planes=spec.planes,
+        segments=tuple(segments),
     )
+
+
+def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
+    return resolve_program_ir(spec).to_timeline()

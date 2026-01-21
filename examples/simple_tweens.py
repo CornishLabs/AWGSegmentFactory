@@ -19,8 +19,8 @@ prog = (
 
     # 0) arm / sync
     .segment("sync", mode="wait_trig")
-        .tones("H").use("start_H")
-        .tones("V").use("start_V")
+        .tones("H").use_def("start_H")
+        .tones("V").use_def("start_V")
         .hold(time=200e-6)  # wait; compiler will quantise freqs to wrap this length
 
     # ---- Trap 0 (left) ----
