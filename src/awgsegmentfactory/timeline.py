@@ -83,9 +83,18 @@ class ResolvedTimeline:
 
     def state_at(self, plane: str, t: float) -> PlaneState:
         spans = self.planes[plane]
+        if not spans:
+            raise ValueError(f"No spans available for plane {plane!r}")
+        if t <= spans[0].t0:
+            return spans[0].start
+        prev_end = spans[0].end
         for sp in spans:
             if sp.t0 <= t <= sp.t1:
                 return sp.state_at(t)
+            if t < sp.t0:
+                # Gap: plane holds its last value until the next span begins.
+                return prev_end
+            prev_end = sp.end
         return spans[-1].end
 
     def sample_times(self, fps: float = 200.0) -> np.ndarray:

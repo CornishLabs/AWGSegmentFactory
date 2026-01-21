@@ -89,14 +89,16 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 dt = _round_to_samples(fs, op.time_s)
                 if dt > 0:
-                    spans[op.plane].append(
-                        Span(t, t + dt, PlaneState(sf, sa, sp), end, interp=op.kind, seg_name=seg.name)
-                    )
+                    for p in spec.planes:
+                        if p == op.plane:
+                            spans[p].append(
+                                Span(t, t + dt, PlaneState(sf, sa, sp), end, interp=op.kind, seg_name=seg.name)
+                            )
+                        else:
+                            st = cur[p]
+                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
                     t += dt
                     seg_time_accum += dt
-                else:
-                    # state update only
-                    cur[op.plane] = end
                 cur[op.plane] = end
                 continue
 
@@ -112,9 +114,12 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 dt = _round_to_samples(fs, op.time_s)
                 if dt > 0:
-                    spans[op.plane].append(
-                        Span(t, t + dt, start, end, interp=op.kind, seg_name=seg.name)
-                    )
+                    for p in spec.planes:
+                        if p == op.plane:
+                            spans[p].append(Span(t, t + dt, start, end, interp=op.kind, seg_name=seg.name))
+                        else:
+                            st = cur[p]
+                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
                     t += dt
                     seg_time_accum += dt
                 cur[op.plane] = end
@@ -140,9 +145,14 @@ def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
 
                 dt = _round_to_samples(fs, op.time_s)
                 if dt > 0:
-                    spans[op.plane].append(
-                        Span(t, t + dt, start, end, interp=op.kind, tau_s=op.tau_s, seg_name=seg.name)
-                    )
+                    for p in spec.planes:
+                        if p == op.plane:
+                            spans[p].append(
+                                Span(t, t + dt, start, end, interp=op.kind, tau_s=op.tau_s, seg_name=seg.name)
+                            )
+                        else:
+                            st = cur[p]
+                            spans[p].append(Span(t, t + dt, st, st, interp="hold", seg_name=seg.name))
                     t += dt
                     seg_time_accum += dt
                 cur[op.plane] = end
