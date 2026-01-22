@@ -4,9 +4,8 @@ from typing import Callable, Optional, Tuple
 import bisect
 
 import numpy as np
-import matplotlib.pyplot as plt
 
-from .timeline import ResolvedTimeline
+from ..timeline import ResolvedTimeline
 
 @dataclass(frozen=True)
 class LinearFreqToPos:
@@ -38,6 +37,13 @@ def interactive_grid_debug(
     Jupyter interactive plot. Shows NxM traps as Cartesian product of H and V tones.
     Requires ipywidgets in your notebook environment.
     """
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "`interactive_grid_debug` requires matplotlib (and ipywidgets). Install the `dev` dependency group."
+        ) from exc
+
     if fx is None:
         fx = LinearFreqToPos(slope_hz_per_unit=1e6)  # MHz
     if fy is None:
@@ -49,8 +55,13 @@ def interactive_grid_debug(
 
     times = tl.sample_times(fps=fps)
 
-    import ipywidgets as widgets
-    from IPython.display import display
+    try:
+        import ipywidgets as widgets
+        from IPython.display import display
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "`interactive_grid_debug` requires ipywidgets. Install the `dev` dependency group."
+        ) from exc
 
     fig, ax = plt.subplots()
 

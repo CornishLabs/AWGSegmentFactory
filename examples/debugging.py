@@ -102,7 +102,7 @@ except Exception:
     _IN_JUPYTER = False
 
 if _IN_JUPYTER:
-    from awgsegmentfactory import interactive_grid_debug, LinearFreqToPos
+    from awgsegmentfactory.debug import interactive_grid_debug, LinearFreqToPos
 
     # Optional: map frequency to "position units" for nicer axes.
     fx = LinearFreqToPos(f0_hz=100e6, slope_hz_per_unit=250e3)  # e.g. µm if 250 kHz/µm

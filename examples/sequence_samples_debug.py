@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from awgsegmentfactory import AWGProgramBuilder, sequence_samples_debug
+from awgsegmentfactory import AWGProgramBuilder
+from awgsegmentfactory.debug import sequence_samples_debug
 
 
 def _maybe_enable_matplotlib_widget_backend() -> None:

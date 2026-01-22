@@ -5,10 +5,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .program_ir import ProgramIR
-from .sample_compile import CompiledSequenceProgram, compile_sequence_program
-from .sample_compile import _interp_plane_part as _interp_plane_part
-from .sequence_compile import quantize_program_ir
+from ..program_ir import ProgramIR
+from ..sample_compile import CompiledSequenceProgram, compile_sequence_program
+from ..sample_compile import _interp_plane_part as _interp_plane_part
+from ..sequence_compile import quantize_program_ir
 
 
 @dataclass(frozen=True)
