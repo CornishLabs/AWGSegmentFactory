@@ -11,3 +11,6 @@ wheels/
 
 # uv cache (useful for sandboxed/CI environments)
 .uv-cache/
+
+# Spectrum spcm driver debug log (may be created when running examples)
+spcmdrv_debug.txt

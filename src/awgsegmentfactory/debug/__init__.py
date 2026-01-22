@@ -6,10 +6,20 @@ __all__ = [
     "interactive_grid_debug",
     "LinearFreqToPos",
     "sequence_samples_debug",
+    "PipelineTimings",
+    "benchmark_builder_pipeline",
+    "compile_builder_pipeline_timed",
+    "format_benchmark_table",
 ]
 
 if TYPE_CHECKING:  # pragma: no cover
     from .plot import LinearFreqToPos, interactive_grid_debug
+    from .perf import (
+        PipelineTimings,
+        benchmark_builder_pipeline,
+        compile_builder_pipeline_timed,
+        format_benchmark_table,
+    )
     from .samples import sequence_samples_debug
 
 
@@ -26,4 +36,23 @@ def __getattr__(name: str):
         from .samples import sequence_samples_debug
 
         return sequence_samples_debug
+    if name in {
+        "PipelineTimings",
+        "benchmark_builder_pipeline",
+        "compile_builder_pipeline_timed",
+        "format_benchmark_table",
+    }:
+        from .perf import (
+            PipelineTimings,
+            benchmark_builder_pipeline,
+            compile_builder_pipeline_timed,
+            format_benchmark_table,
+        )
+
+        return {
+            "PipelineTimings": PipelineTimings,
+            "benchmark_builder_pipeline": benchmark_builder_pipeline,
+            "compile_builder_pipeline_timed": compile_builder_pipeline_timed,
+            "format_benchmark_table": format_benchmark_table,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
