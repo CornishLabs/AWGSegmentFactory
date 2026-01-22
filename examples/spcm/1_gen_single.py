@@ -73,7 +73,7 @@ with spcm.Card(
     )
     try:
         card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_WAITREADY)
-    except spcm.SpcmTimeout as timeout:
+    except spcm.SpcmTimeout:
         print("-> The 10 seconds timeout have passed and the card is stopped")
 
     # Without the above "spcm.M2CMD_CARD_WAITREADY" flag you can do things here in parallel

@@ -1,4 +1,10 @@
 # %%
+from __future__ import annotations
+
+import numpy as np
+
+from awgsegmentfactory import AWGProgramBuilder
+
 # In a notebook, enable the ipympl widget backend for interactive plots.
 # When run as plain Python, this is a no-op (so the file stays runnable/testable).
 def _maybe_enable_matplotlib_widget_backend() -> None:
@@ -17,10 +23,6 @@ def _maybe_enable_matplotlib_widget_backend() -> None:
 
 _maybe_enable_matplotlib_widget_backend()
 # %%
-import numpy as np
-from awgsegmentfactory import AWGProgramBuilder
-
-
 prog = (
     AWGProgramBuilder(sample_rate=625e6)
     .logical_channel("H")

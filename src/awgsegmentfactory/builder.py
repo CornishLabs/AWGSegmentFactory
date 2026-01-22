@@ -1,8 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-
-import numpy as np
 
 from .ir import (
     ProgramSpec,
@@ -18,12 +15,6 @@ from .ir import (
 )
 from .program_ir import ProgramIR
 from .resolve import resolve_program, resolve_program_ir
-
-
-def _as_tuple_f(x: float | Sequence[float]) -> Tuple[float, ...]:
-    if isinstance(x, (int, float)):
-        return (float(x),)
-    return tuple(float(v) for v in x)
 
 
 def _phases_auto(n: int) -> Tuple[float, ...]:
@@ -104,9 +95,7 @@ class ToneView:
     ) -> "ToneView":
         src_t = tuple(int(i) for i in src)
 
-        # dst="all" means 0..len(target_def)-1, but we don't know length here;
-        # store "all" as empty sentinel and expand in build_spec() using definitions.
-        # For simplicity: expand here by looking up definitions now.
+        # dst="all" expands to 0..len(target_def)-1 (resolved here by looking up the definition).
         d = self._b._definitions[target_def]
         if dst == "all":
             dst_t = tuple(range(len(d.freqs_hz)))
@@ -149,6 +138,16 @@ class ToneView:
 
 
 class AWGProgramBuilder:
+    """
+    Fluent front-end for building an AWG program.
+
+    Notes:
+    - A `logical_channel` is just a user-defined name (e.g. "H", "V") selecting which
+      tone-bank an operation applies to; it is not a hardware channel.
+    - The timeline is continuous: logical-channel state carries across segment
+      boundaries; `time=0` ops update state without advancing time.
+    """
+
     def __init__(self, sample_rate: float):
         if sample_rate <= 0:
             raise ValueError("sample_rate must be > 0")

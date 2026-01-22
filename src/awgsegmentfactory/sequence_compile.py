@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -231,7 +231,9 @@ def quantize_program_ir(
                     trimmed.append(part)
                     keep -= part.n_samples
                 else:
-                    trimmed.append(PartIR(n_samples=keep, logical_channels=part.logical_channels))
+                    trimmed.append(
+                        PartIR(n_samples=keep, logical_channels=part.logical_channels)
+                    )
                     keep = 0
             parts = trimmed
             if sum(p.n_samples for p in parts) != n1:  # pragma: no cover
@@ -251,9 +253,14 @@ def quantize_program_ir(
                     st = LogicalChannelState(
                         snapped, pp.start.amps.copy(), pp.start.phases_rad.copy()
                     )
-                    new_logical_channels[lc] = LogicalChannelPartIR(start=st, end=st, interp="hold")
+                    new_logical_channels[lc] = LogicalChannelPartIR(
+                        start=st, end=st, interp="hold"
+                    )
                 new_parts.append(
-                    PartIR(n_samples=part.n_samples, logical_channels=new_logical_channels)
+                    PartIR(
+                        n_samples=part.n_samples,
+                        logical_channels=new_logical_channels,
+                    )
                 )
             parts = new_parts
 
@@ -267,4 +274,11 @@ def quantize_program_ir(
             )
         )
 
-    return ProgramIR(sample_rate_hz=fs, logical_channels=ir.logical_channels, segments=tuple(out_segments)), infos
+    return (
+        ProgramIR(
+            sample_rate_hz=fs,
+            logical_channels=ir.logical_channels,
+            segments=tuple(out_segments),
+        ),
+        infos,
+    )

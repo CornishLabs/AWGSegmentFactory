@@ -1,4 +1,3 @@
-import numpy as np
 from awgsegmentfactory import AWGProgramBuilder
 
 fs = 1e9

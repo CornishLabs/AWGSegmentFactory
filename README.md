@@ -103,6 +103,14 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/timeline.py`) and `ProgramIR.to_timeline()`
 
+## Composite structures:
+
+'IR' means 'Intermediate Representation'.
+
+On the within the 'program_ir' (the IR which is good for compilation) we have:
+A whole program is represented by:
+`ProgramIR`, which is formed of `SegmentIR`s that themselves are composed of `PartIR`s.
+
 ## Repository guide (reading order)
 
 1) `examples/compilation_stages.py` – end-to-end overview of the pipeline.

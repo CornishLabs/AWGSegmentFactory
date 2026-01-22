@@ -4,8 +4,6 @@ import numpy as np
 
 from .ir import (
     ProgramSpec,
-    SegmentSpec,
-    SegmentMode,
     HoldOp,
     UseDefOp,
     MoveOp,
@@ -24,14 +22,6 @@ def _empty_state() -> LogicalChannelState:
     )
 
 
-def _round_to_samples(sample_rate_hz: float, time_s: float) -> float:
-    if time_s <= 0:
-        return 0.0
-    dt = 1.0 / sample_rate_hz
-    n = int(np.ceil(time_s / dt))
-    return n * dt
-
-
 def _ceil_samples(sample_rate_hz: float, time_s: float) -> int:
     if time_s <= 0:
         return 0
@@ -47,7 +37,40 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
     return idx
 
 
+def _hold_parts(
+    spec: ProgramSpec, cur: Dict[str, LogicalChannelState]
+) -> Dict[str, LogicalChannelPartIR]:
+    return {
+        lc: LogicalChannelPartIR(start=cur[lc], end=cur[lc], interp="hold")
+        for lc in spec.logical_channels
+    }
+
+
+def _append_target_part(
+    parts: List[PartIR],
+    *,
+    spec: ProgramSpec,
+    cur: Dict[str, LogicalChannelState],
+    n_samples: int,
+    logical_channel: str,
+    target_part: LogicalChannelPartIR,
+) -> None:
+    if n_samples <= 0:
+        return
+    logical_channels = _hold_parts(spec, cur)
+    logical_channels[logical_channel] = target_part
+    parts.append(PartIR(n_samples=n_samples, logical_channels=logical_channels))
+
+
 def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
+    """
+    Resolve a ProgramSpec into a fully-explicit ProgramIR.
+
+    Guarantees:
+    - state is carried across segment boundaries (no implicit resets)
+    - every timed op produces a PartIR containing *all* logical channels
+    - `time=0` ops update state without advancing time
+    """
     fs = spec.sample_rate_hz
 
     # current per-logical-channel state
@@ -104,21 +127,17 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
-                    for lc in spec.logical_channels:
-                        if lc == op.logical_channel:
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=LogicalChannelState(sf, sa, sp),
-                                end=end,
-                                interp=op.kind,
-                            )
-                        else:
-                            st = cur[lc]
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=st, end=st, interp="hold"
-                            )
-                    parts.append(
-                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    _append_target_part(
+                        parts,
+                        spec=spec,
+                        cur=cur,
+                        n_samples=n,
+                        logical_channel=op.logical_channel,
+                        target_part=LogicalChannelPartIR(
+                            start=LogicalChannelState(sf, sa, sp),
+                            end=end,
+                            interp=op.kind,
+                        ),
                     )
                     seg_samples += n
                 cur[op.logical_channel] = end
@@ -140,19 +159,15 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
-                    for lc in spec.logical_channels:
-                        if lc == op.logical_channel:
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=start, end=end, interp=op.kind
-                            )
-                        else:
-                            st = cur[lc]
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=st, end=st, interp="hold"
-                            )
-                    parts.append(
-                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    _append_target_part(
+                        parts,
+                        spec=spec,
+                        cur=cur,
+                        n_samples=n,
+                        logical_channel=op.logical_channel,
+                        target_part=LogicalChannelPartIR(
+                            start=start, end=end, interp=op.kind
+                        ),
                     )
                     seg_samples += n
                 cur[op.logical_channel] = end
@@ -184,19 +199,18 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
-                    for lc in spec.logical_channels:
-                        if lc == op.logical_channel:
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=start, end=end, interp=op.kind, tau_s=op.tau_s
-                            )
-                        else:
-                            st = cur[lc]
-                            logical_channels[lc] = LogicalChannelPartIR(
-                                start=st, end=st, interp="hold"
-                            )
-                    parts.append(
-                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    _append_target_part(
+                        parts,
+                        spec=spec,
+                        cur=cur,
+                        n_samples=n,
+                        logical_channel=op.logical_channel,
+                        target_part=LogicalChannelPartIR(
+                            start=start,
+                            end=end,
+                            interp=op.kind,
+                            tau_s=op.tau_s,
+                        ),
                     )
                     seg_samples += n
                 cur[op.logical_channel] = end
@@ -210,11 +224,9 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                     continue
 
                 # Hold applies to all logical channels (continuous timeline)
-                logical_channels = {
-                    lc: LogicalChannelPartIR(start=cur[lc], end=cur[lc], interp="hold")
-                    for lc in spec.logical_channels
-                }
-                parts.append(PartIR(n_samples=n, logical_channels=logical_channels))
+                parts.append(
+                    PartIR(n_samples=n, logical_channels=_hold_parts(spec, cur))
+                )
                 seg_samples += n
                 continue
 

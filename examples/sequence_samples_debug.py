@@ -7,8 +7,6 @@ In Jupyter, you may want:
 
 from __future__ import annotations
 
-import numpy as np
-
 from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.debug import sequence_samples_debug
 

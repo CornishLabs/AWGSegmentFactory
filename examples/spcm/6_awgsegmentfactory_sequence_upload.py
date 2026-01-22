@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import time
 
-import numpy as np
-
 from awgsegmentfactory import (
     AWGProgramBuilder,
+    ProgramIR,
     compile_sequence_program,
     format_samples_time,
 )
@@ -23,7 +22,7 @@ from awgsegmentfactory import (
 
 def _build_demo_program(
     *, sample_rate_hz: float
-) -> "awgsegmentfactory.program_ir.ProgramIR":
+) -> ProgramIR:
     b = (
         AWGProgramBuilder(sample_rate=sample_rate_hz)
         .logical_channel("H")

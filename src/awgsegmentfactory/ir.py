@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, NewType, Optional, Sequence, Tuple, Literal
+from typing import Dict, NewType, Optional, Tuple, Literal
 
 SegmentMode = Literal["loop_n", "wait_trig", "once"]
 InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
@@ -94,6 +94,8 @@ class RemapFromDefOp(Op):
 
 @dataclass(frozen=True)
 class ProgramSpec:
+    """Recorded user intent (pre-resolution): definitions + segments of ops."""
+
     sample_rate_hz: float
     logical_channels: Tuple[str, ...]
     definitions: Dict[str, DefinitionSpec]

@@ -79,6 +79,13 @@ class Span:
 
 @dataclass
 class ResolvedTimeline:
+    """
+    Debug view of a resolved program as per-logical-channel time spans.
+
+    This is intended for plotting / inspection (e.g. `state_at(...)`). The "real"
+    compiler input is `ProgramIR`.
+    """
+
     sample_rate_hz: float
     logical_channels: Dict[str, List[Span]]
     segment_starts: List[tuple[float, str]]
