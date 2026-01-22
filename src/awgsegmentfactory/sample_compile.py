@@ -131,7 +131,7 @@ def _synth_logical_channel_segment(
     *,
     logical_channel: str,
     sample_rate_hz: float,
-    phase_in: Optional[npCompiledSequenceProgram.ndarray],
+    phase_in: Optional[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
     if not seg.parts:
         return np.zeros((0,), dtype=float), np.zeros((0,), dtype=float)
