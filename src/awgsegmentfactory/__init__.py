@@ -21,6 +21,7 @@ __all__ = [
     "quantum_samples",
     "interactive_grid_debug",
     "LinearFreqToPos",
+    "sequence_samples_debug",
 ]
 
 
@@ -34,4 +35,13 @@ def __getattr__(name: str):
                 "Install the `dev` dependency group (matplotlib, ipywidgets, etc.)."
             ) from exc
         return interactive_grid_debug if name == "interactive_grid_debug" else LinearFreqToPos
+    if name == "sequence_samples_debug":
+        try:
+            from .debug_samples import sequence_samples_debug
+        except ModuleNotFoundError as exc:  # pragma: no cover
+            raise ModuleNotFoundError(
+                "`awgsegmentfactory.sequence_samples_debug` requires matplotlib. "
+                "Install the `dev` dependency group."
+            ) from exc
+        return sequence_samples_debug
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
