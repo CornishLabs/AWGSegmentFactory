@@ -33,17 +33,19 @@ def _phases_auto(n: int) -> Tuple[float, ...]:
 
 class ToneView:
     """
-    View over a particular plane (e.g. "H" or "V") within the current segment.
-    Implements plane ops and forwards builder methods so fluent chaining works.
+    View over a particular logical channel (e.g. "H" or "V") within the current segment.
+    Implements per-channel ops and forwards builder methods so fluent chaining works.
     """
 
-    def __init__(self, b: "AWGProgramBuilder", plane: str):
+    def __init__(self, b: "AWGProgramBuilder", logical_channel: str):
         self._b = b
-        self._plane = plane
+        self._logical_channel = logical_channel
 
-    # ---- plane ops ----
+    # ---- per-logical-channel ops ----
     def use_def(self, def_name: str) -> "ToneView":
-        self._b._append(UseDefOp(plane=self._plane, def_name=def_name))
+        self._b._append(
+            UseDefOp(logical_channel=self._logical_channel, def_name=def_name)
+        )
         return self
 
     def move(
@@ -57,7 +59,7 @@ class ToneView:
         idx_t = tuple(int(i) for i in idxs) if idxs is not None else None
         self._b._append(
             MoveOp(
-                plane=self._plane,
+                logical_channel=self._logical_channel,
                 df_hz=float(df),
                 time_s=float(time),
                 idxs=idx_t,
@@ -81,7 +83,7 @@ class ToneView:
         )
         self._b._append(
             RampAmpToOp(
-                plane=self._plane,
+                logical_channel=self._logical_channel,
                 amps_target=amps_t,  # type: ignore[arg-type]
                 time_s=float(time),
                 kind=kind,  # type: ignore[arg-type]
@@ -113,7 +115,7 @@ class ToneView:
 
         self._b._append(
             RemapFromDefOp(
-                plane=self._plane,
+                logical_channel=self._logical_channel,
                 target_def=target_def,
                 src=src_t,
                 dst=dst_t,
@@ -124,8 +126,8 @@ class ToneView:
         return self
 
     # ---- forward builder methods for fluent chaining ----
-    def tones(self, plane: str) -> "ToneView":
-        return self._b.tones(plane)
+    def tones(self, logical_channel: str) -> "ToneView":
+        return self._b.tones(logical_channel)
 
     def segment(
         self,
@@ -151,7 +153,7 @@ class AWGProgramBuilder:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be > 0")
         self._fs = float(sample_rate)
-        self._planes: List[str] = []
+        self._logical_channels: List[str] = []
         self._definitions: Dict[str, DefinitionSpec] = {}
         self._segments: List[SegmentSpec] = []
         self._current_seg: Optional[int] = None
@@ -161,24 +163,25 @@ class AWGProgramBuilder:
         self._calibrations[key] = obj
         return self
 
-    def plane(self, name: str) -> "AWGProgramBuilder":
-        if name in self._planes:
+    def logical_channel(self, name: str) -> "AWGProgramBuilder":
+        if name in self._logical_channels:
             return self
-        self._planes.append(str(name))
+        self._logical_channels.append(str(name))
         return self
 
     def define(
         self,
         name: str,
         *,
-        plane: str,
+        logical_channel: str,
         freqs: Sequence[float],
         amps: Sequence[float],
         phases: str | Sequence[float] = "auto",
     ) -> "AWGProgramBuilder":
-        if plane not in self._planes:
+        if logical_channel not in self._logical_channels:
             raise ValueError(
-                f"Define references unknown plane {plane!r}. Call .plane({plane!r}) first."
+                f"Define references unknown logical_channel {logical_channel!r}. "
+                f"Call .logical_channel({logical_channel!r}) first."
             )
         if len(freqs) != len(amps):
             raise ValueError("define: freqs and amps must have same length")
@@ -193,7 +196,7 @@ class AWGProgramBuilder:
 
         self._definitions[name] = DefinitionSpec(
             name=name,
-            plane=plane,
+            logical_channel=logical_channel,
             freqs_hz=tuple(float(x) for x in freqs),
             amps=tuple(float(x) for x in amps),
             phases_rad=ph,
@@ -231,12 +234,12 @@ class AWGProgramBuilder:
         self._current_seg = len(self._segments) - 1
         return self
 
-    def tones(self, plane: str) -> ToneView:
-        if plane not in self._planes:
-            raise KeyError(f"Unknown plane {plane!r}")
+    def tones(self, logical_channel: str) -> ToneView:
+        if logical_channel not in self._logical_channels:
+            raise KeyError(f"Unknown logical_channel {logical_channel!r}")
         if self._current_seg is None:
             raise RuntimeError("Call .segment(...) before .tones(...)")
-        return ToneView(self, plane)
+        return ToneView(self, logical_channel)
 
     def hold(
         self, *, time: float, warn_df: Optional[float] = None
@@ -256,7 +259,11 @@ class AWGProgramBuilder:
             raise RuntimeError("Call .segment(...) before adding ops")
         seg = self._segments[self._current_seg]
         self._segments[self._current_seg] = SegmentSpec(
-            name=seg.name, mode=seg.mode, loop=seg.loop, ops=seg.ops + (op,)
+            name=seg.name,
+            mode=seg.mode,
+            loop=seg.loop,
+            ops=seg.ops + (op,),
+            phase_mode=seg.phase_mode,
         )
 
     def build_spec(self) -> ProgramSpec:
@@ -264,7 +271,7 @@ class AWGProgramBuilder:
             raise RuntimeError("No segments defined")
         return ProgramSpec(
             sample_rate_hz=self._fs,
-            planes=tuple(self._planes),
+            logical_channels=tuple(self._logical_channels),
             definitions=dict(self._definitions),
             segments=tuple(self._segments),
             calibrations=dict(self._calibrations),

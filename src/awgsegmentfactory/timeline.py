@@ -7,7 +7,7 @@ InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
 
 
 @dataclass(frozen=True)
-class PlaneState:
+class LogicalChannelState:
     freqs_hz: np.ndarray  # (N,)
     amps: np.ndarray  # (N,)
     phases_rad: np.ndarray  # (N,)
@@ -17,8 +17,8 @@ class PlaneState:
 class Span:
     t0: float
     t1: float
-    start: PlaneState
-    end: PlaneState
+    start: LogicalChannelState
+    end: LogicalChannelState
     interp: InterpKind
     tau_s: Optional[float] = None
     seg_name: Optional[str] = None
@@ -30,7 +30,7 @@ class Span:
         # classic 5th order minimum-jerk polynomial
         return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
-    def state_at(self, t: float) -> PlaneState:
+    def state_at(self, t: float) -> LogicalChannelState:
         if t <= self.t0:
             return self.start
         if t >= self.t1:
@@ -52,13 +52,13 @@ class Span:
             freqs = f0 + (f1 - f0) * uu
             amps = a0 + (a1 - a0) * uu
             phases = p0 + (p1 - p0) * uu
-            return PlaneState(freqs, amps, phases)
+            return LogicalChannelState(freqs, amps, phases)
 
         if self.interp == "linear":
             freqs = f0 + (f1 - f0) * u
             amps = a0 + (a1 - a0) * u
             phases = p0 + (p1 - p0) * u
-            return PlaneState(freqs, amps, phases)
+            return LogicalChannelState(freqs, amps, phases)
 
         if self.interp == "exp":
             # interpret as exponential approach for AMPLITUDES primarily; freqs/phases usually constant
@@ -66,13 +66,13 @@ class Span:
                 freqs = f0 + (f1 - f0) * u
                 amps = a0 + (a1 - a0) * u
                 phases = p0 + (p1 - p0) * u
-                return PlaneState(freqs, amps, phases)
+                return LogicalChannelState(freqs, amps, phases)
             x = t - self.t0
             k = np.exp(-x / self.tau_s)
             freqs = f1 + (f0 - f1) * k
             amps = a1 + (a0 - a1) * k
             phases = p1 + (p0 - p1) * k
-            return PlaneState(freqs, amps, phases)
+            return LogicalChannelState(freqs, amps, phases)
 
         raise ValueError(f"Unknown interp {self.interp!r}")
 
@@ -80,14 +80,14 @@ class Span:
 @dataclass
 class ResolvedTimeline:
     sample_rate_hz: float
-    planes: Dict[str, List[Span]]
+    logical_channels: Dict[str, List[Span]]
     segment_starts: List[tuple[float, str]]
     t_end: float
 
-    def state_at(self, plane: str, t: float) -> PlaneState:
-        spans = self.planes[plane]
+    def state_at(self, logical_channel: str, t: float) -> LogicalChannelState:
+        spans = self.logical_channels[logical_channel]
         if not spans:
-            raise ValueError(f"No spans available for plane {plane!r}")
+            raise ValueError(f"No spans available for logical_channel {logical_channel!r}")
         if t <= spans[0].t0:
             return spans[0].start
         prev_end = spans[0].end
@@ -95,7 +95,7 @@ class ResolvedTimeline:
             if sp.t0 <= t <= sp.t1:
                 return sp.state_at(t)
             if t < sp.t0:
-                # Gap: plane holds its last value until the next span begins.
+                # Gap: logical channel holds its last value until the next span begins.
                 return prev_end
             prev_end = sp.end
         return spans[-1].end

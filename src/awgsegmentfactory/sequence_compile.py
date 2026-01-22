@@ -5,8 +5,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from .program_ir import PartIR, PlanePartIR, ProgramIR, SegmentIR
-from .timeline import PlaneState
+from .program_ir import PartIR, LogicalChannelPartIR, ProgramIR, SegmentIR
+from .timeline import LogicalChannelState
 
 
 @dataclass(frozen=True)
@@ -92,16 +92,16 @@ def min_segment_samples_per_channel(*, n_channels: int) -> int:
     return 384 // n_channels
 
 
-def _segment_is_constant(seg: SegmentIR, plane: str) -> bool:
+def _segment_is_constant(seg: SegmentIR, logical_channel: str) -> bool:
     """
-    True if a segment is a pure hold for the given plane: no parameter changes
+    True if a segment is a pure hold for the given logical channel: no parameter changes
     across time, so it can be repeated without discontinuities (aside from phase wrap).
     """
     if not seg.parts:
         return True
-    ref: Optional[PlaneState] = None
+    ref: Optional[LogicalChannelState] = None
     for part in seg.parts:
-        pp = part.planes[plane]
+        pp = part.logical_channels[logical_channel]
         if pp.interp != "hold":
             return False
         if not np.array_equal(pp.start.freqs_hz, pp.end.freqs_hz):
@@ -135,7 +135,7 @@ def _snap_freqs_to_wrap(
 def quantize_program_ir(
     ir: ProgramIR,
     *,
-    plane_to_channel: Dict[str, int],
+    logical_channel_to_hardware_channel: Dict[str, int],
     segment_quantum_s: float = 40e-6,
     step_samples: int = 32,
 ) -> tuple[ProgramIR, list[SegmentQuantizationInfo]]:
@@ -152,7 +152,7 @@ def quantize_program_ir(
         fs, quantum_s=segment_quantum_s, step_samples=step_samples
     )
 
-    n_channels = len(set(plane_to_channel.values()))
+    n_channels = len(set(logical_channel_to_hardware_channel.values()))
     min_samples = min_segment_samples_per_channel(n_channels=n_channels)
     min_samples = _ceil_to_multiple(min_samples, step_samples)
 
@@ -163,7 +163,7 @@ def quantize_program_ir(
         loopable = seg.mode == "wait_trig" or seg.loop > 1
         n0 = int(seg.n_samples)
 
-        constant = all(_segment_is_constant(seg, p) for p in ir.planes)
+        constant = all(_segment_is_constant(seg, lc) for lc in ir.logical_channels)
 
         if loopable:
             # For loopable segments, prefer a global "quantum" length. For non-constant
@@ -206,15 +206,15 @@ def quantize_program_ir(
                 raise RuntimeError(
                     "resolve_program_ir produced a segment with no parts"
                 )
-            hold_planes = {
-                p: PlanePartIR(
-                    start=parts[-1].planes[p].end,
-                    end=parts[-1].planes[p].end,
+            hold_logical_channels = {
+                lc: LogicalChannelPartIR(
+                    start=parts[-1].logical_channels[lc].end,
+                    end=parts[-1].logical_channels[lc].end,
                     interp="hold",
                 )
-                for p in ir.planes
+                for lc in ir.logical_channels
             }
-            parts.append(PartIR(n_samples=extra, planes=hold_planes))
+            parts.append(PartIR(n_samples=extra, logical_channels=hold_logical_channels))
         elif extra < 0:
             # Shorten only constant loopable segments (safe to truncate holds).
             if not constant:
@@ -231,7 +231,7 @@ def quantize_program_ir(
                     trimmed.append(part)
                     keep -= part.n_samples
                 else:
-                    trimmed.append(PartIR(n_samples=keep, planes=part.planes))
+                    trimmed.append(PartIR(n_samples=keep, logical_channels=part.logical_channels))
                     keep = 0
             parts = trimmed
             if sum(p.n_samples for p in parts) != n1:  # pragma: no cover
@@ -242,18 +242,18 @@ def quantize_program_ir(
             seg_len = n1
             new_parts: list[PartIR] = []
             for part in parts:
-                new_plane_parts: Dict[str, PlanePartIR] = {}
-                for p in ir.planes:
-                    pp = part.planes[p]
+                new_logical_channels: Dict[str, LogicalChannelPartIR] = {}
+                for lc in ir.logical_channels:
+                    pp = part.logical_channels[lc]
                     snapped = _snap_freqs_to_wrap(
                         pp.start.freqs_hz, n_samples=seg_len, sample_rate_hz=fs
                     )
-                    st = PlaneState(
+                    st = LogicalChannelState(
                         snapped, pp.start.amps.copy(), pp.start.phases_rad.copy()
                     )
-                    new_plane_parts[p] = PlanePartIR(start=st, end=st, interp="hold")
+                    new_logical_channels[lc] = LogicalChannelPartIR(start=st, end=st, interp="hold")
                 new_parts.append(
-                    PartIR(n_samples=part.n_samples, planes=new_plane_parts)
+                    PartIR(n_samples=part.n_samples, logical_channels=new_logical_channels)
                 )
             parts = new_parts
 
@@ -267,6 +267,4 @@ def quantize_program_ir(
             )
         )
 
-    return ProgramIR(
-        sample_rate_hz=fs, planes=ir.planes, segments=tuple(out_segments)
-    ), infos
+    return ProgramIR(sample_rate_hz=fs, logical_channels=ir.logical_channels, segments=tuple(out_segments)), infos

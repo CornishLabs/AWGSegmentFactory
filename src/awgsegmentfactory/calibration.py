@@ -14,5 +14,5 @@ class LinearPositionToFreqCalib(PositionToFreqCalib):
 
     slope_hz_per_um: float
 
-    def df_hz(self, tone_id: ToneId, dx_um: float, axis: str) -> float:
+    def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float:
         return self.slope_hz_per_um * float(dx_um)

@@ -20,18 +20,18 @@ class TestProgramIR(unittest.TestCase):
 
         spec = ProgramSpec(
             sample_rate_hz=fs,
-            planes=("H", "V"),
+            logical_channels=("H", "V"),
             definitions={
                 "dH": DefinitionSpec(
                     name="dH",
-                    plane="H",
+                    logical_channel="H",
                     freqs_hz=(100.0,),
                     amps=(1.0,),
                     phases_rad=(0.0,),
                 ),
                 "dV": DefinitionSpec(
                     name="dV",
-                    plane="V",
+                    logical_channel="V",
                     freqs_hz=(200.0,),
                     amps=(1.0,),
                     phases_rad=(0.0,),
@@ -43,8 +43,8 @@ class TestProgramIR(unittest.TestCase):
                     mode="loop_n",
                     loop=1,
                     ops=(
-                        UseDefOp(plane="H", def_name="dH"),
-                        UseDefOp(plane="V", def_name="dV"),
+                        UseDefOp(logical_channel="H", def_name="dH"),
+                        UseDefOp(logical_channel="V", def_name="dV"),
                         HoldOp(time_s=1.0),
                     ),
                 ),
@@ -52,7 +52,11 @@ class TestProgramIR(unittest.TestCase):
                     name="move_row_up",
                     mode="loop_n",
                     loop=1,
-                    ops=(MoveOp(plane="V", df_hz=2.0, time_s=1.0, idxs=(0,)),),
+                    ops=(
+                        MoveOp(
+                            logical_channel="V", df_hz=2.0, time_s=1.0, idxs=(0,)
+                        ),
+                    ),
                 ),
                 SegmentSpec(
                     name="wait_for_trigger_B",
@@ -65,15 +69,19 @@ class TestProgramIR(unittest.TestCase):
                     mode="loop_n",
                     loop=1,
                     ops=(
-                        RampAmpToOp(plane="H", amps_target=0.0, time_s=1.0),
-                        RampAmpToOp(plane="V", amps_target=0.0, time_s=1.0),
+                        RampAmpToOp(logical_channel="H", amps_target=0.0, time_s=1.0),
+                        RampAmpToOp(logical_channel="V", amps_target=0.0, time_s=1.0),
                     ),
                 ),
                 SegmentSpec(
                     name="move_back",
                     mode="loop_n",
                     loop=1,
-                    ops=(MoveOp(plane="V", df_hz=-2.0, time_s=1.0, idxs=(0,)),),
+                    ops=(
+                        MoveOp(
+                            logical_channel="V", df_hz=-2.0, time_s=1.0, idxs=(0,)
+                        ),
+                    ),
                 ),
             ),
             calibrations={},

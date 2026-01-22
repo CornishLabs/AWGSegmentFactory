@@ -23,24 +23,24 @@ from awgsegmentfactory import AWGProgramBuilder
 
 prog = (
     AWGProgramBuilder(sample_rate=625e6)
-    .plane("H")
-    .plane("V")
+    .logical_channel("H")
+    .logical_channel("V")
     .define(
         "loading_H",
-        plane="H",
+        logical_channel="H",
         freqs=np.linspace(80.0e6, 120.0e6, 12),
         amps=[0.7] * 12,
         phases="auto",
     )
-    .define("loading_V", plane="V", freqs=[100e6], amps=[0.7], phases="auto")
+    .define("loading_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
     .define(
         "exp_H",
-        plane="H",
+        logical_channel="H",
         freqs=np.linspace(90.0e6, 110.0e6, 8),
         amps=[0.7] * 8,
         phases="auto",
     )
-    .define("exp_V", plane="V", freqs=[100e6], amps=[0.7], phases="auto")
+    .define("exp_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
     .segment("sync", mode="wait_trig")
     .hold(time=1 / 625e6)
     .segment("loading_tweezers_on", mode="wait_trig")
@@ -114,8 +114,8 @@ if _IN_JUPYTER:
 
     fig, ax = interactive_grid_debug(
         prog,
-        plane_h="H",
-        plane_v="V",
+        logical_channel_h="H",
+        logical_channel_v="V",
         fx=fx,
         fy=fy,
         fps=300,

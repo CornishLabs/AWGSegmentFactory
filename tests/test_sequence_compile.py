@@ -2,17 +2,22 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory.program_ir import PartIR, PlanePartIR, ProgramIR, SegmentIR
+from awgsegmentfactory.program_ir import (
+    LogicalChannelPartIR,
+    PartIR,
+    ProgramIR,
+    SegmentIR,
+)
 from awgsegmentfactory.sequence_compile import (
     format_samples_time,
     quantum_samples,
     quantize_program_ir,
 )
-from awgsegmentfactory.timeline import PlaneState
+from awgsegmentfactory.timeline import LogicalChannelState
 
 
-def _empty_plane_state() -> PlaneState:
-    return PlaneState(
+def _empty_logical_channel_state() -> LogicalChannelState:
+    return LogicalChannelState(
         freqs_hz=np.zeros((0,), dtype=float),
         amps=np.zeros((0,), dtype=float),
         phases_rad=np.zeros((0,), dtype=float),
@@ -27,7 +32,7 @@ class TestSequenceCompile(unittest.TestCase):
 
     def test_quantize_non_loopable_segment_ceils_to_step(self) -> None:
         fs = 1000.0
-        st = PlaneState(
+        st = LogicalChannelState(
             freqs_hz=np.array([10.0]), amps=np.array([1.0]), phases_rad=np.array([0.0])
         )
         seg = SegmentIR(
@@ -37,26 +42,28 @@ class TestSequenceCompile(unittest.TestCase):
             parts=(
                 PartIR(
                     n_samples=193,
-                    planes={
-                        "H": PlanePartIR(start=st, end=st, interp="hold"),
-                        "V": PlanePartIR(
-                            start=_empty_plane_state(),
-                            end=_empty_plane_state(),
+                    logical_channels={
+                        "H": LogicalChannelPartIR(start=st, end=st, interp="hold"),
+                        "V": LogicalChannelPartIR(
+                            start=_empty_logical_channel_state(),
+                            end=_empty_logical_channel_state(),
                             interp="hold",
                         ),
                     },
                 ),
             ),
         )
-        ir = ProgramIR(sample_rate_hz=fs, planes=("H", "V"), segments=(seg,))
+        ir = ProgramIR(sample_rate_hz=fs, logical_channels=("H", "V"), segments=(seg,))
 
-        q_ir, info = quantize_program_ir(ir, plane_to_channel={"H": 0, "V": 1})
+        q_ir, info = quantize_program_ir(
+            ir, logical_channel_to_hardware_channel={"H": 0, "V": 1}
+        )
         self.assertEqual(info[0].original_samples, 193)
         self.assertEqual(info[0].quantized_samples, 224)
         self.assertEqual(q_ir.segments[0].n_samples, 224)
 
         # Non-loopable segments do not get frequency wrap snapping.
-        f = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
+        f = q_ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), 10.0, places=12)
 
     def test_quantize_loopable_constant_segment_can_round_down_and_snaps_freqs(
@@ -64,10 +71,10 @@ class TestSequenceCompile(unittest.TestCase):
     ) -> None:
         fs = 1000.0
         f0 = 7.0
-        st = PlaneState(
+        st = LogicalChannelState(
             freqs_hz=np.array([f0]), amps=np.array([1.0]), phases_rad=np.array([0.0])
         )
-        empty = _empty_plane_state()
+        empty = _empty_logical_channel_state()
 
         seg = SegmentIR(
             name="wait",
@@ -76,19 +83,21 @@ class TestSequenceCompile(unittest.TestCase):
             parts=(
                 PartIR(
                     n_samples=110,
-                    planes={
-                        "H": PlanePartIR(start=st, end=st, interp="hold"),
-                        "V": PlanePartIR(start=empty, end=empty, interp="hold"),
-                        "A": PlanePartIR(start=empty, end=empty, interp="hold"),
-                        "B": PlanePartIR(start=empty, end=empty, interp="hold"),
+                    logical_channels={
+                        "H": LogicalChannelPartIR(start=st, end=st, interp="hold"),
+                        "V": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "A": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "B": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
                     },
                 ),
             ),
         )
-        ir = ProgramIR(sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg,))
+        ir = ProgramIR(
+            sample_rate_hz=fs, logical_channels=("H", "V", "A", "B"), segments=(seg,)
+        )
 
         q_ir, info = quantize_program_ir(
-            ir, plane_to_channel={"H": 0, "V": 1, "A": 2, "B": 3}
+            ir, logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3}
         )
 
         # 110 rounded to nearest multiple of 32 -> 96, and 4 active channels -> min segment is 96.
@@ -98,5 +107,5 @@ class TestSequenceCompile(unittest.TestCase):
 
         seg_len_s = 96 / fs
         expected = round(f0 * seg_len_s) / seg_len_s
-        f = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
+        f = q_ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), expected, places=12)

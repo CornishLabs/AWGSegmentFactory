@@ -13,17 +13,17 @@ ToneId = NewType("ToneId", int)
 class PositionToFreqCalib(ABC):
     """
     Calibration interface: convert a requested position delta (e.g. µm) into a
-    frequency delta (Hz) for a given tone and axis.
+    frequency delta (Hz) for a given tone and logical channel.
     """
 
     @abstractmethod
-    def df_hz(self, tone_id: ToneId, dx_um: float, axis: str) -> float: ...
+    def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float: ...
 
 
 @dataclass(frozen=True)
 class DefinitionSpec:
     name: str
-    plane: str
+    logical_channel: str
     freqs_hz: Tuple[float, ...]
     amps: Tuple[float, ...]
     phases_rad: Tuple[float, ...]  # keep, even if unused now
@@ -53,13 +53,13 @@ class HoldOp(Op):
 
 @dataclass(frozen=True)
 class UseDefOp(Op):
-    plane: str
+    logical_channel: str
     def_name: str
 
 
 @dataclass(frozen=True)
 class MoveOp(Op):
-    plane: str
+    logical_channel: str
     df_hz: float
     time_s: float
     idxs: Optional[Tuple[int, ...]] = None
@@ -68,7 +68,7 @@ class MoveOp(Op):
 
 @dataclass(frozen=True)
 class RampAmpToOp(Op):
-    plane: str
+    logical_channel: str
     amps_target: float | Tuple[float, ...]
     time_s: float
     kind: InterpKind = "linear"  # "linear" or "exp"
@@ -79,12 +79,12 @@ class RampAmpToOp(Op):
 @dataclass(frozen=True)
 class RemapFromDefOp(Op):
     """
-    Retarget: take selected existing tones (src indices in current plane state),
+    Retarget: take selected existing tones (src indices in current logical-channel state),
     map onto target definition ordering (dst indices), tween to target def values.
     Typically this also changes the number of tones to len(dst).
     """
 
-    plane: str
+    logical_channel: str
     target_def: str
     src: Tuple[int, ...]
     dst: Tuple[int, ...]  # explicit indices into target definition
@@ -95,7 +95,7 @@ class RemapFromDefOp(Op):
 @dataclass(frozen=True)
 class ProgramSpec:
     sample_rate_hz: float
-    planes: Tuple[str, ...]
+    logical_channels: Tuple[str, ...]
     definitions: Dict[str, DefinitionSpec]
     segments: Tuple[SegmentSpec, ...]
     calibrations: Dict[str, object]

@@ -19,13 +19,13 @@ import numpy as np
 import warnings
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.program_ir import PlanePartIR
+from awgsegmentfactory.program_ir import LogicalChannelPartIR
 
 
 def _describe_spec(spec) -> None:
     print("\n== ProgramSpec (intent IR) ==")
     print(f"sample_rate_hz: {spec.sample_rate_hz}")
-    print(f"planes: {spec.planes}")
+    print(f"logical_channels: {spec.logical_channels}")
     print(f"definitions: {list(spec.definitions.keys())}")
     for seg in spec.segments:
         op_names = [type(op).__name__ for op in seg.ops]
@@ -42,7 +42,7 @@ def _describe_ir(ir) -> None:
             f"- segment {seg.name!r}: mode={seg.mode} loop={seg.loop} samples={seg.n_samples}"
         )
         for i, part in enumerate(seg.parts):
-            kinds = {p: part.planes[p].interp for p in ir.planes}
+            kinds = {lc: part.logical_channels[lc].interp for lc in ir.logical_channels}
             print(f"  part {i}: n_samples={part.n_samples} kinds={kinds}")
 
 
@@ -50,14 +50,14 @@ def _interp_min_jerk(u: np.ndarray) -> np.ndarray:
     return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
 
-def _plane_part_to_arrays(
-    pp: PlanePartIR,
+def _logical_channel_part_to_arrays(
+    pp: LogicalChannelPartIR,
     *,
     n_samples: int,
     sample_rate_hz: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Vectorise a PlanePartIR into per-sample arrays (freqs/amps/phases).
+    Vectorise a LogicalChannelPartIR into per-sample arrays (freqs/amps/phases).
 
     Notes:
     - This is a *demonstration*; the final AWG compiler will want to define a precise
@@ -136,9 +136,11 @@ def main() -> None:
     fs = 10.0  # small so sample rounding is obvious
 
     # ---- 1) Builder (high-level intent) ----
-    b = AWGProgramBuilder(sample_rate=fs).plane("H").plane("V")
-    b.define("init_H", plane="H", freqs=[7.0, 9.0], amps=[1.0, 0.5], phases="auto")
-    b.define("init_V", plane="V", freqs=[100.0], amps=[1.0], phases="auto")
+    b = AWGProgramBuilder(sample_rate=fs).logical_channel("H").logical_channel("V")
+    b.define(
+        "init_H", logical_channel="H", freqs=[7.0, 9.0], amps=[1.0, 0.5], phases="auto"
+    )
+    b.define("init_V", logical_channel="V", freqs=[100.0], amps=[1.0], phases="auto")
 
     b.segment("sync", mode="wait_trig")
     b.tones("H").use_def("init_H")
@@ -172,11 +174,11 @@ def main() -> None:
     print(f"t_end: {tl.t_end:.6f}s | segment_starts: {tl.segment_starts}")
     print("state_at(H, t=0.05):", asdict(tl.state_at("H", 0.05)))
 
-    # ---- 5) Example: vectorise a single segment+plane into samples ----
+    # ---- 5) Example: vectorise a single segment+logical_channel into samples ----
     seg0 = ir.segments[0]
     part0 = seg0.parts[0]
-    ppH = part0.planes["H"]
-    freqs, amps, phases = _plane_part_to_arrays(
+    ppH = part0.logical_channels["H"]
+    freqs, amps, phases = _logical_channel_part_to_arrays(
         ppH, n_samples=part0.n_samples, sample_rate_hz=ir.sample_rate_hz
     )
     y = _tonebank_to_samples(
@@ -184,7 +186,7 @@ def main() -> None:
     )
     print("\n== Vectorised synthesis demo ==")
     print(
-        f"segment {seg0.name!r} plane 'H': freqs shape={freqs.shape} amps shape={amps.shape} y shape={y.shape}"
+        f"segment {seg0.name!r} logical_channel 'H': freqs shape={freqs.shape} amps shape={amps.shape} y shape={y.shape}"
     )
     print("first few y samples:", np.array2string(y[: min(len(y), 8)], precision=4))
 

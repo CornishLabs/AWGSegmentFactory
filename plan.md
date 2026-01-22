@@ -16,7 +16,7 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 4. **`src/awgsegmentfactory/resolve.py`** (or whatever your resolver file is named)
 
    * The “compiler stage 1”: turns the spec into resolved, explicit per-part start/end states.
-5. **`src/awgsegmentfactory/debug_plot.py`** (or `debug.py`)
+5. **`src/awgsegmentfactory/debug/plot.py`** (or `src/awgsegmentfactory/debug/__init__.py`)
 
    * Visualization: takes resolved IR and produces slider plots / animations.
 6. **`src/awgsegmentfactory/__init__.py`**
@@ -38,7 +38,7 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 **Intent:** formal, stable “contract” between stages.
 **Does:** defines:
 
-* **Spec-level types** (what the builder emits): segments, ops (move/ramp/hold/remap), definitions, planes
+* **Spec-level types** (what the builder emits): segments, ops (move/ramp/hold/remap), definitions, logical channels
 * **Resolved IR types** (what the resolver emits): a timeline broken into parts with explicit `start_state`, `end_state`, `duration`, `interp`, etc.
 
 ### `resolve.py` (or similar)
@@ -53,7 +53,7 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 
 This is where the “state should carry across segments” rule is enforced.
 
-### `debug_plot.py`
+### `debug/plot.py`
 
 **Intent:** rapid sanity checking.
 **Does:** renders the resolved IR as a time-slider animation:
@@ -90,8 +90,8 @@ A standalone, composable **AWG program “factory”** that lets you write reada
 ```python
 prog = (
   AWGProgramBuilder(sample_rate=625e6)
-    .plane("H").plane("V")
-    .define("loading_H", plane="H", freqs=[...], amps=[...], phases="auto")
+    .logical_channel("H").logical_channel("V")
+    .define("loading_H", logical_channel="H", freqs=[...], amps=[...], phases="auto")
     ...
     .segment("move_row_up", mode="loop_n", loop=1)
       .tones("V").move(df=2e6, time=1.0, idxs=[0])
@@ -103,8 +103,8 @@ prog = (
 
 and produces a **resolved intermediate representation (IR)** that is “compiler-friendly”: each segment becomes a list of **independent parts** where each part explicitly has:
 
-* start freqs/amps/phases per plane
-* end freqs/amps/phases per plane
+* start freqs/amps/phases per logical channel
+* end freqs/amps/phases per logical channel
 * duration
 * interpolation (linear/exp/min-jerk/hold)
 * plus metadata for wait-trig segments (snapping / quantisation)
@@ -125,7 +125,7 @@ This IR is then (later) compiled into raw AWG samples / segments for Spectrum `s
 
 * The resolved program must **carry end state → next segment start state**.
 * Definitions (`define(...)`) are templates; they only affect the active state when explicitly “applied” (e.g. `use_def`, `remap_from_def`).
-* We discovered and fixed a bug where plane state was rebuilt from definitions at segment boundaries, causing moves to “reset”.
+* We discovered and fixed a bug where logical-channel state was rebuilt from definitions at segment boundaries, causing moves to “reset”.
 
 ### 3) Quantised hold semantics
 
@@ -145,7 +145,7 @@ We aim for consistent, minimal primitives:
 * `tones("H").remove(idxs=...)` removes tones (indexing changes; builder makes this explicit).
 * `tones("H").remap_from_def(target_def=..., src=[...], dst="all", time=..., kind="min_jerk")` for hotswap/rearrange.
 
-We’re *not* implementing full “grid semantics” (Cartesian NxM) yet; we treat H and V as independent planes. Later we can add grid metadata / helpers without changing core IR.
+We’re *not* implementing full “grid semantics” (Cartesian NxM) yet; we treat H and V as independent logical channels. Later we can add grid metadata / helpers without changing core IR.
 
 ### 5) Debug-first workflow
 
@@ -170,7 +170,7 @@ Resolved IR is “flat and explicit”, no dependence on builder chain:
 * `ProgramIR(sample_rate_hz, segments=[ResolvedSegment...])`
 * `ResolvedSegment(name, mode, loop, parts=[ResolvedPart...], start_state, end_state)`
 * `ResolvedPart(duration_s, interp_kind, start_state, end_state, metadata...)`
-* `State` contains per plane:
+* `State` contains per logical channel:
 
   * list of tones: freqs_hz[], amps[], phases_rad[]
   * optional tone ids for tracking/remove/remap

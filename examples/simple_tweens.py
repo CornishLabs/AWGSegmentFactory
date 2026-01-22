@@ -10,11 +10,11 @@ V0 = 100e6
 
 prog = (
     AWGProgramBuilder(sample_rate=fs)
-    .plane("H")
-    .plane("V")
+    .logical_channel("H")
+    .logical_channel("V")
     # Define initial trap states (paired indexing: trap i = (H[i], V[i]))
-    .define("start_H", plane="H", freqs=[H0, H1], amps=[0.7, 0.7], phases="auto")
-    .define("start_V", plane="V", freqs=[V0, V0], amps=[0.7, 0.7], phases="auto")
+    .define("start_H", logical_channel="H", freqs=[H0, H1], amps=[0.7, 0.7], phases="auto")
+    .define("start_V", logical_channel="V", freqs=[V0, V0], amps=[0.7, 0.7], phases="auto")
     # 0) arm / sync
     .segment("sync", mode="wait_trig")
     .tones("H")
@@ -31,7 +31,7 @@ prog = (
     .segment("left_right", mode="once")
     .tones("H")
     .move(df=+1.0e6, time=200e-6, idxs=[0])
-    # 3) ramp it down (amp of trap 0 on both planes; keep trap “present”)
+    # 3) ramp it down (amp of trap 0 on both logical channels; keep trap “present”)
     .segment("left_ramp_down", mode="once")
     .tones("H")
     .ramp_amp_to(amps=[0.1], time=1e-3, idxs=[0], kind="exp", tau=0.2e-3)

@@ -6,26 +6,26 @@ cal = LinearPositionToFreqCalib(slope_hz_per_um=250e3)  # example: 250 kHz / µm
 ir = (
     AWGProgramBuilder(sample_rate=625e6)  # 625MHz
     .with_calibration("pos_to_df", cal)
-    .plane("H")
-    .plane("V")
+    .logical_channel("H")
+    .logical_channel("V")
     # .grid("twz", H="H", V="V")  # optional metadata only; not needed for control
     # Definitions (do not “play” yet)
     .define(
         "loading_H",
-        plane="H",
+        logical_channel="H",
         freqs=np.linspace(80.0e6, 120.0e6, 12),
         amps=[0.7] * 12,
         phases="auto",
     )
-    .define("loading_V", plane="V", freqs=[100e6], amps=[0.7], phases="auto")
+    .define("loading_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
     .define(
         "exp_H",
-        plane="H",
+        logical_channel="H",
         freqs=np.linspace(90.0e6, 110.0e6, 8),
         amps=[0.7] * 8,
         phases="auto",
     )
-    .define("exp_V", plane="V", freqs=[100e6], amps=[0.7], phases="auto")
+    .define("exp_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
     # 1) Initial sync: minimum length, wait for first trigger
     .segment("sync", mode="wait_trig")
     .hold(
@@ -73,7 +73,7 @@ ir = (
     # 7) Wait again
     .segment("wait_for_trigger_B", mode="wait_trig")
     .hold(time=200e-6)
-    # 8) Ramp off (both planes)
+    # 8) Ramp off (both logical channels)
     .segment("ramp_off", mode="loop_n", loop=1)
     .tones("H")
     .ramp_amp_to(amps=0.0, time=4e-5, kind="exp", tau=1e-5)
@@ -111,10 +111,10 @@ for seg in ir.segments:
     if not seg.parts:
         continue
     for i, part in enumerate(seg.parts):
-        plane_H = part.planes.get("H")
-        plane_V = part.planes.get("V")
-        h_desc = f"H:{plane_H.interp}" if plane_H is not None else "H:—"
-        v_desc = f"V:{plane_V.interp}" if plane_V is not None else "V:—"
+        lc_H = part.logical_channels.get("H")
+        lc_V = part.logical_channels.get("V")
+        h_desc = f"H:{lc_H.interp}" if lc_H is not None else "H:—"
+        v_desc = f"V:{lc_V.interp}" if lc_V is not None else "V:—"
         print(
             f"part {i}: n={part.n_samples} ({part.n_samples / ir.sample_rate_hz * 1e6:.2f} µs) {h_desc} {v_desc}"
         )

@@ -31,10 +31,10 @@ def main() -> None:
 
     ir = (
         AWGProgramBuilder(sample_rate=fs)
-        .plane("H")
-        .plane("V")
-        .define("H0", plane="H", freqs=[90e6], amps=[0.3], phases="auto")
-        .define("V0", plane="V", freqs=[100e6], amps=[0.3], phases="auto")
+        .logical_channel("H")
+        .logical_channel("V")
+        .define("H0", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
+        .define("V0", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
         .segment("wait", mode="wait_trig")
         .tones("H")
         .use_def("H0")
@@ -59,7 +59,7 @@ def main() -> None:
 
     fig, axs, slider = sequence_samples_debug(
         ir,
-        plane_to_channel={"H": 0, "V": 1},
+        logical_channel_to_hardware_channel={"H": 0, "V": 1},
         wait_trig_loops=3,
         include_wrap_preview=True,
         window_samples=None,  # show the whole unrolled sequence; zoom in with the GUI

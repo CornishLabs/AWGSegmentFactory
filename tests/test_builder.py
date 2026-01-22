@@ -12,8 +12,8 @@ class TestBuilder(unittest.TestCase):
         fs = 4.0  # dt=0.25s
         b = (
             AWGProgramBuilder(sample_rate=fs)
-            .plane("H")
-            .define("dH", plane="H", freqs=[100.0], amps=[1.0], phases="auto")
+            .logical_channel("H")
+            .define("dH", logical_channel="H", freqs=[100.0], amps=[1.0], phases="auto")
             .segment("seg0", mode="once")
             .tones("H")
             .use_def("dH")
@@ -29,25 +29,25 @@ class TestBuilder(unittest.TestCase):
 
         part = ir.segments[0].parts[0]
         self.assertEqual(part.n_samples, 2)
-        np.testing.assert_allclose(part.planes["H"].start.freqs_hz, [100.0])
-        np.testing.assert_allclose(part.planes["H"].start.amps, [1.0])
+        np.testing.assert_allclose(part.logical_channels["H"].start.freqs_hz, [100.0])
+        np.testing.assert_allclose(part.logical_channels["H"].start.amps, [1.0])
 
         # build() returns the debug timeline view; it should match the IR duration.
         tl = b.build()
         self.assertEqual(tl.t_end, ir.duration_s)
 
     def test_build_spec_records_ops_and_expands_remap_dst_all(self) -> None:
-        b = AWGProgramBuilder(sample_rate=10.0).plane("H")
+        b = AWGProgramBuilder(sample_rate=10.0).logical_channel("H")
         b.define(
             "start",
-            plane="H",
+            logical_channel="H",
             freqs=[1.0, 2.0, 3.0],
             amps=[1.0, 1.0, 1.0],
             phases="auto",
         )
         b.define(
             "target",
-            plane="H",
+            logical_channel="H",
             freqs=[4.0, 5.0, 6.0],
             amps=[1.0, 1.0, 1.0],
             phases="auto",
@@ -80,11 +80,11 @@ class TestBuilder(unittest.TestCase):
 
         b = (
             AWGProgramBuilder(sample_rate=fs)
-            .plane("H")
-            .plane("V")
-            .plane("A")
-            .plane("B")
-            .define("dH", plane="H", freqs=[f0], amps=[1.0], phases="auto")
+            .logical_channel("H")
+            .logical_channel("V")
+            .logical_channel("A")
+            .logical_channel("B")
+            .define("dH", logical_channel="H", freqs=[f0], amps=[1.0], phases="auto")
             .segment("wait", mode="wait_trig")
             .tones("H")
             .use_def("dH")
@@ -94,12 +94,14 @@ class TestBuilder(unittest.TestCase):
         ir = b.build_ir()
         self.assertEqual(ir.segments[0].n_samples, 110)
         self.assertAlmostEqual(
-            float(ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]), f0, places=12
+            float(ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]),
+            f0,
+            places=12,
         )
 
         q_ir, q_info = quantize_program_ir(
             ir,
-            plane_to_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
         )
         self.assertEqual(q_ir.segments[0].n_samples, 96)
         self.assertEqual(q_info[0].original_samples, 110)
@@ -107,7 +109,7 @@ class TestBuilder(unittest.TestCase):
 
         seg_len_s = 96 / fs
         expected = round(f0 * seg_len_s) / seg_len_s
-        snapped = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
+        snapped = q_ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(snapped), expected, places=12)
 
     def test_loop_n_hold_does_not_snap(self) -> None:
@@ -115,20 +117,20 @@ class TestBuilder(unittest.TestCase):
         f0 = 7.0
         b = (
             AWGProgramBuilder(sample_rate=fs)
-            .plane("H")
-            .define("dH", plane="H", freqs=[f0], amps=[1.0], phases="auto")
+            .logical_channel("H")
+            .define("dH", logical_channel="H", freqs=[f0], amps=[1.0], phases="auto")
             .segment("hold", mode="once")
             .tones("H")
             .use_def("dH")
             .hold(time=0.25, warn_df=0.1)
         )
         ir = b.build_ir()
-        f = ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
+        f = ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), f0, places=12)
 
     def test_segment_with_only_time_zero_ops_errors(self) -> None:
-        b = AWGProgramBuilder(sample_rate=10.0).plane("H")
-        b.define("dH", plane="H", freqs=[1.0], amps=[1.0], phases="auto")
+        b = AWGProgramBuilder(sample_rate=10.0).logical_channel("H")
+        b.define("dH", logical_channel="H", freqs=[1.0], amps=[1.0], phases="auto")
         b.segment("bad", mode="once")
         b.tones("H").use_def("dH").move(df=1.0, time=0.0)
         with self.assertRaises(ValueError):

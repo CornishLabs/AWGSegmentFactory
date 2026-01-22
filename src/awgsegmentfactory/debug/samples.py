@@ -7,7 +7,7 @@ import numpy as np
 
 from ..program_ir import ProgramIR
 from ..sample_compile import CompiledSequenceProgram, compile_sequence_program
-from ..sample_compile import _interp_plane_part as _interp_plane_part
+from ..sample_compile import _interp_logical_channel_part as _interp_logical_channel_part
 from ..sequence_compile import quantize_program_ir
 
 
@@ -93,7 +93,7 @@ def unroll_compiled_sequence_for_debug(
     - If `include_wrap_preview=True`, appends the entry step once so the final
       wrap-around boundary is visible.
     """
-    n_channels = max(compiled.plane_to_channel.values()) + 1
+    n_channels = max(compiled.logical_channel_to_hardware_channel.values()) + 1
     instances_spec = _iter_instances_for_debug(
         compiled,
         wait_trig_loops=wait_trig_loops,
@@ -133,7 +133,7 @@ def unroll_compiled_sequence_for_debug(
 def sequence_samples_debug(
     program: ProgramIR | CompiledSequenceProgram,
     *,
-    plane_to_channel: Optional[Dict[str, int]] = None,
+    logical_channel_to_hardware_channel: Optional[Dict[str, int]] = None,
     wait_trig_loops: int = 3,
     include_wrap_preview: bool = True,
     gain: float = 1.0,
@@ -176,12 +176,17 @@ def sequence_samples_debug(
     if isinstance(program, CompiledSequenceProgram):
         compiled = program
     else:
-        if plane_to_channel is None:
-            raise ValueError("plane_to_channel is required when passing a ProgramIR")
-        q_ir, _q_info = quantize_program_ir(program, plane_to_channel=plane_to_channel)
+        if logical_channel_to_hardware_channel is None:
+            raise ValueError(
+                "logical_channel_to_hardware_channel is required when passing a ProgramIR"
+            )
+        q_ir, _q_info = quantize_program_ir(
+            program,
+            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
+        )
         compiled = compile_sequence_program(
             program,
-            plane_to_channel=plane_to_channel,
+            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             gain=gain,
             clip=clip,
             full_scale=full_scale,
@@ -211,17 +216,17 @@ def sequence_samples_debug(
         raise ValueError("max_points_param must be > 2")
 
     if channels is None:
-        channels = sorted(set(compiled.plane_to_channel.values()))
+        channels = sorted(set(compiled.logical_channel_to_hardware_channel.values()))
     channels = [int(c) for c in channels]
     if not channels:
         raise ValueError("channels must be non-empty")
     if min(channels) < 0 or max(channels) >= samples.shape[0]:
         raise ValueError("channels out of range for compiled data")
 
-    # Invert plane->channel mapping for labels (best-effort).
-    ch_to_planes: Dict[int, List[str]] = {}
-    for plane, ch in compiled.plane_to_channel.items():
-        ch_to_planes.setdefault(int(ch), []).append(str(plane))
+    # Invert logical_channel->hardware_channel mapping for labels (best-effort).
+    hw_ch_to_logical_channels: Dict[int, List[str]] = {}
+    for logical_channel, hw_ch in compiled.logical_channel_to_hardware_channel.items():
+        hw_ch_to_logical_channels.setdefault(int(hw_ch), []).append(str(logical_channel))
 
     if param_channels is None:
         param_channels = list(channels)
@@ -310,8 +315,8 @@ def sequence_samples_debug(
         )
         wave_lines.append(line)
 
-        planes = ",".join(sorted(ch_to_planes.get(ch, [])))
-        label = f"CH{ch}" + (f" ({planes})" if planes else "")
+        logical_channels = ",".join(sorted(hw_ch_to_logical_channels.get(ch, [])))
+        label = f"CH{ch}" + (f" ({logical_channels})" if logical_channels else "")
         ax.set_ylabel(label)
         ax.grid(True, alpha=0.3)
 
@@ -347,42 +352,42 @@ def sequence_samples_debug(
             raise ValueError("freq_unit must be one of: 'Hz', 'kHz', 'MHz', 'GHz'")
         f_scale = {"Hz": 1.0, "kHz": 1e-3, "MHz": 1e-6, "GHz": 1e-9}[freq_unit]
 
-        def _param_plane_for_channel(ch: int) -> Optional[str]:
-            planes = sorted(ch_to_planes.get(ch, []))
-            return planes[0] if planes else None
+        def _param_logical_channel_for_hardware_channel(ch: int) -> Optional[str]:
+            logical_channels = sorted(hw_ch_to_logical_channels.get(ch, []))
+            return logical_channels[0] if logical_channels else None
 
-        def _max_tones_for_plane(plane: str) -> int:
-            if plane in max_tones_cache:
-                return max_tones_cache[plane]
+        def _max_tones_for_logical_channel(logical_channel: str) -> int:
+            if logical_channel in max_tones_cache:
+                return max_tones_cache[logical_channel]
             if q_ir is None:
                 return 0
             m = 0
             for seg in q_ir.segments:
                 for part in seg.parts:
-                    pp = part.planes[plane]
+                    pp = part.logical_channels[logical_channel]
                     m = max(m, int(pp.start.freqs_hz.shape[0]))
-            max_tones_cache[plane] = m
+            max_tones_cache[logical_channel] = m
             return m
 
         def _segment_params(
-            seg_index: int, plane: str
+            seg_index: int, logical_channel: str
         ) -> tuple[np.ndarray, np.ndarray]:
-            key = (int(seg_index), plane)
+            key = (int(seg_index), logical_channel)
             if key in segment_param_cache:
                 return segment_param_cache[key]
             if q_ir is None:
                 raise RuntimeError("q_ir missing")
             seg = q_ir.segments[int(seg_index)]
             n = int(seg.n_samples)
-            max_tones = _max_tones_for_plane(plane)
+            max_tones = _max_tones_for_logical_channel(logical_channel)
             freqs = np.full((n, max_tones), np.nan, dtype=np.float32)
             amps = np.full((n, max_tones), np.nan, dtype=np.float32)
             cursor = 0
             for part in seg.parts:
-                pp = part.planes[plane]
+                pp = part.logical_channels[logical_channel]
                 if part.n_samples <= 0:
                     continue
-                f_part, a_part = _interp_plane_part(
+                f_part, a_part = _interp_logical_channel_part(
                     pp, n_samples=part.n_samples, sample_rate_hz=q_ir.sample_rate_hz
                 )
                 f_part = f_part.astype(np.float32, copy=False)
@@ -485,11 +490,11 @@ def sequence_samples_debug(
         y = samples[ch, x0w:x1w:step]
         return x, y
 
-    def _params_at(plane: str, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _params_at(logical_channel: str, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if q_ir is None:
             raise RuntimeError("q_ir missing")
         if x.size == 0:
-            max_tones = _max_tones_for_plane(plane)
+            max_tones = _max_tones_for_logical_channel(logical_channel)
             z = np.full((0, max_tones), np.nan, dtype=np.float32)
             return z, z
 
@@ -497,14 +502,14 @@ def sequence_samples_debug(
         inst_idx = np.clip(inst_idx, 0, len(instances) - 1)
         local = x - inst_starts[inst_idx]
 
-        max_tones = _max_tones_for_plane(plane)
+        max_tones = _max_tones_for_logical_channel(logical_channel)
         freqs = np.full((x.size, max_tones), np.nan, dtype=np.float32)
         amps = np.full((x.size, max_tones), np.nan, dtype=np.float32)
 
         for idx in np.unique(inst_idx):
             mask = inst_idx == idx
             seg_index = int(instances[int(idx)].segment_index)
-            seg_freqs, seg_amps = _segment_params(seg_index, plane)
+            seg_freqs, seg_amps = _segment_params(seg_index, logical_channel)
             offs = local[mask]
             freqs[mask, :] = seg_freqs[offs, :]
             amps[mask, :] = seg_amps[offs, :]
@@ -549,10 +554,10 @@ def sequence_samples_debug(
                 x = np.arange(x0w, x1w, step, dtype=int)
                 x_float = x.astype(float, copy=False)
                 for row, ch in enumerate(param_channels[:2]):
-                    plane = _param_plane_for_channel(ch)
-                    if plane is None:
+                    logical_channel = _param_logical_channel_for_hardware_channel(ch)
+                    if logical_channel is None:
                         continue
-                    freqs_w, amps_w = _params_at(plane, x)
+                    freqs_w, amps_w = _params_at(logical_channel, x)
                     freqs_plot = freqs_w * f_scale
 
                     ax_f = ax_param[row * 2 + 0] if n_param_rows == 2 else ax_param[0]

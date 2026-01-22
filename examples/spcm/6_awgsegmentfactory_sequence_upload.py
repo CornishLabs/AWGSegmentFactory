@@ -26,10 +26,10 @@ def _build_demo_program(
 ) -> "awgsegmentfactory.program_ir.ProgramIR":
     b = (
         AWGProgramBuilder(sample_rate=sample_rate_hz)
-        .plane("H")
-        .plane("V")
-        .define("init_H", plane="H", freqs=[90e6], amps=[0.3], phases="auto")
-        .define("init_V", plane="V", freqs=[100e6], amps=[0.3], phases="auto")
+        .logical_channel("H")
+        .logical_channel("V")
+        .define("init_H", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
+        .define("init_V", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
     )
 
     # 0) Wait for trigger, output stable tones (this segment loops until a trigger event)
@@ -93,7 +93,7 @@ def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
 
 def main() -> None:
     sample_rate_hz = 625e6
-    plane_to_channel = {"H": 0, "V": 1}
+    logical_channel_to_hardware_channel = {"H": 0, "V": 1}
 
     ir = _build_demo_program(sample_rate_hz=sample_rate_hz)
 
@@ -101,7 +101,7 @@ def main() -> None:
     full_scale_default = 32767
     compiled = compile_sequence_program(
         ir,
-        plane_to_channel=plane_to_channel,
+        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
@@ -146,7 +146,7 @@ def main() -> None:
         full_scale = int(card.max_sample_value()) - 1
         compiled = compile_sequence_program(
             ir,
-            plane_to_channel=plane_to_channel,
+            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             gain=1.0,
             clip=0.9,
             full_scale=full_scale,

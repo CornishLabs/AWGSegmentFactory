@@ -12,12 +12,12 @@ from .ir import (
     RampAmpToOp,
     RemapFromDefOp,
 )
-from .program_ir import ProgramIR, SegmentIR, PartIR, PlanePartIR
-from .timeline import PlaneState, ResolvedTimeline
+from .program_ir import ProgramIR, SegmentIR, PartIR, LogicalChannelPartIR
+from .timeline import LogicalChannelState, ResolvedTimeline
 
 
-def _empty_state() -> PlaneState:
-    return PlaneState(
+def _empty_state() -> LogicalChannelState:
+    return LogicalChannelState(
         freqs_hz=np.zeros((0,), dtype=float),
         amps=np.zeros((0,), dtype=float),
         phases_rad=np.zeros((0,), dtype=float),
@@ -50,8 +50,10 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
 def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
     fs = spec.sample_rate_hz
 
-    # current per-plane state
-    cur: Dict[str, PlaneState] = {p: _empty_state() for p in spec.planes}
+    # current per-logical-channel state
+    cur: Dict[str, LogicalChannelState] = {
+        lc: _empty_state() for lc in spec.logical_channels
+    }
     segments: List[SegmentIR] = []
 
     for seg in spec.segments:
@@ -61,12 +63,13 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
         for op in seg.ops:
             if isinstance(op, UseDefOp):
                 d = spec.definitions[op.def_name]
-                if d.plane != op.plane:
+                if d.logical_channel != op.logical_channel:
                     raise ValueError(
-                        f"Definition {d.name} is for plane {d.plane}, not {op.plane}"
+                        f"Definition {d.name} is for logical_channel {d.logical_channel}, "
+                        f"not {op.logical_channel}"
                     )
 
-                cur[op.plane] = PlaneState(
+                cur[op.logical_channel] = LogicalChannelState(
                     freqs_hz=np.array(d.freqs_hz, dtype=float),
                     amps=np.array(d.amps, dtype=float),
                     phases_rad=np.array(d.phases_rad, dtype=float),
@@ -75,12 +78,13 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
             if isinstance(op, RemapFromDefOp):
                 d = spec.definitions[op.target_def]
-                if d.plane != op.plane:
+                if d.logical_channel != op.logical_channel:
                     raise ValueError(
-                        f"Definition {d.name} is for plane {d.plane}, not {op.plane}"
+                        f"Definition {d.name} is for logical_channel {d.logical_channel}, "
+                        f"not {op.logical_channel}"
                     )
 
-                start = cur[op.plane]
+                start = cur[op.logical_channel]
                 # build target arrays at dst indices
                 tf = np.array(d.freqs_hz, dtype=float)[list(op.dst)]
                 ta = np.array(d.amps, dtype=float)[list(op.dst)]
@@ -96,35 +100,39 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                         f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
                     )
 
-                end = PlaneState(freqs_hz=tf, amps=ta, phases_rad=tp)
+                end = LogicalChannelState(freqs_hz=tf, amps=ta, phases_rad=tp)
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    planes: Dict[str, PlanePartIR] = {}
-                    for p in spec.planes:
-                        if p == op.plane:
-                            planes[p] = PlanePartIR(
-                                start=PlaneState(sf, sa, sp),
+                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
+                    for lc in spec.logical_channels:
+                        if lc == op.logical_channel:
+                            logical_channels[lc] = LogicalChannelPartIR(
+                                start=LogicalChannelState(sf, sa, sp),
                                 end=end,
                                 interp=op.kind,
                             )
                         else:
-                            st = cur[p]
-                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
-                    parts.append(PartIR(n_samples=n, planes=planes))
+                            st = cur[lc]
+                            logical_channels[lc] = LogicalChannelPartIR(
+                                start=st, end=st, interp="hold"
+                            )
+                    parts.append(
+                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    )
                     seg_samples += n
-                cur[op.plane] = end
+                cur[op.logical_channel] = end
                 continue
 
             if isinstance(op, MoveOp):
-                start = cur[op.plane]
+                start = cur[op.logical_channel]
                 n = len(start.freqs_hz)
                 idx = _select_idxs(n, op.idxs)
 
                 f1 = start.freqs_hz.copy()
                 f1[idx] = f1[idx] + float(op.df_hz)
 
-                end = PlaneState(
+                end = LogicalChannelState(
                     freqs_hz=f1,
                     amps=start.amps.copy(),
                     phases_rad=start.phases_rad.copy(),
@@ -132,22 +140,26 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    planes: Dict[str, PlanePartIR] = {}
-                    for p in spec.planes:
-                        if p == op.plane:
-                            planes[p] = PlanePartIR(
+                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
+                    for lc in spec.logical_channels:
+                        if lc == op.logical_channel:
+                            logical_channels[lc] = LogicalChannelPartIR(
                                 start=start, end=end, interp=op.kind
                             )
                         else:
-                            st = cur[p]
-                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
-                    parts.append(PartIR(n_samples=n, planes=planes))
+                            st = cur[lc]
+                            logical_channels[lc] = LogicalChannelPartIR(
+                                start=st, end=st, interp="hold"
+                            )
+                    parts.append(
+                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    )
                     seg_samples += n
-                cur[op.plane] = end
+                cur[op.logical_channel] = end
                 continue
 
             if isinstance(op, RampAmpToOp):
-                start = cur[op.plane]
+                start = cur[op.logical_channel]
                 n = len(start.amps)
                 idx = _select_idxs(n, op.idxs)
 
@@ -164,7 +176,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 else:
                     a1[idx] = float(op.amps_target)
 
-                end = PlaneState(
+                end = LogicalChannelState(
                     freqs_hz=start.freqs_hz.copy(),
                     amps=a1,
                     phases_rad=start.phases_rad.copy(),
@@ -172,18 +184,22 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
-                    planes: Dict[str, PlanePartIR] = {}
-                    for p in spec.planes:
-                        if p == op.plane:
-                            planes[p] = PlanePartIR(
+                    logical_channels: Dict[str, LogicalChannelPartIR] = {}
+                    for lc in spec.logical_channels:
+                        if lc == op.logical_channel:
+                            logical_channels[lc] = LogicalChannelPartIR(
                                 start=start, end=end, interp=op.kind, tau_s=op.tau_s
                             )
                         else:
-                            st = cur[p]
-                            planes[p] = PlanePartIR(start=st, end=st, interp="hold")
-                    parts.append(PartIR(n_samples=n, planes=planes))
+                            st = cur[lc]
+                            logical_channels[lc] = LogicalChannelPartIR(
+                                start=st, end=st, interp="hold"
+                            )
+                    parts.append(
+                        PartIR(n_samples=n, logical_channels=logical_channels)
+                    )
                     seg_samples += n
-                cur[op.plane] = end
+                cur[op.logical_channel] = end
                 continue
 
             if isinstance(op, HoldOp):
@@ -193,12 +209,12 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                     # so a hold(0) is a state-noop; allowed.
                     continue
 
-                # Hold applies to all planes (continuous timeline)
-                planes = {
-                    p: PlanePartIR(start=cur[p], end=cur[p], interp="hold")
-                    for p in spec.planes
+                # Hold applies to all logical channels (continuous timeline)
+                logical_channels = {
+                    lc: LogicalChannelPartIR(start=cur[lc], end=cur[lc], interp="hold")
+                    for lc in spec.logical_channels
                 }
-                parts.append(PartIR(n_samples=n, planes=planes))
+                parts.append(PartIR(n_samples=n, logical_channels=logical_channels))
                 seg_samples += n
                 continue
 
@@ -224,7 +240,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
     return ProgramIR(
         sample_rate_hz=fs,
-        planes=spec.planes,
+        logical_channels=spec.logical_channels,
         segments=tuple(segments),
     )
 

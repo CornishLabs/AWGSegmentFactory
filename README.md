@@ -42,10 +42,10 @@ fs = 625e6
 
 ir = (
     AWGProgramBuilder(sample_rate=fs)
-    .plane("H")
-    .plane("V")
-    .define("init_H", plane="H", freqs=[90e6], amps=[0.3], phases="auto")
-    .define("init_V", plane="V", freqs=[100e6], amps=[0.3], phases="auto")
+    .logical_channel("H")
+    .logical_channel("V")
+    .define("init_H", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
+    .define("init_V", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
     .segment("wait", mode="wait_trig")     # loops until trigger
         .tones("H").use_def("init_H")
         .tones("V").use_def("init_V")
@@ -64,7 +64,7 @@ from awgsegmentfactory import compile_sequence_program
 
 compiled = compile_sequence_program(
     ir,
-    plane_to_channel={"H": 0, "V": 1},
+    logical_channel_to_hardware_channel={"H": 0, "V": 1},
     gain=1.0,
     clip=0.9,
     full_scale=32767,
@@ -87,10 +87,10 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 1) **Build** (`src/awgsegmentfactory/builder.py`)
    - `AWGProgramBuilder` records your fluent calls into a spec.
 2) **Intent IR** (`src/awgsegmentfactory/ir.py`)
-   - `ProgramSpec` contains planes/definitions/segments and a list of ops per segment.
+   - `ProgramSpec` contains logical channels/definitions/segments and a list of ops per segment.
 3) **Compile IR** (`src/awgsegmentfactory/program_ir.py`)
    - `ProgramIR` groups the program into segments and “parts”, where each part has an
-     integer length `n_samples` and a per-plane primitive: `(start, end, interp, tau)`.
+     integer length `n_samples` and a per-logical-channel primitive: `(start, end, interp, tau)`.
    - Produced by `resolve_program_ir()` in `src/awgsegmentfactory/resolve.py`.
 4) **Quantise for hardware** (`src/awgsegmentfactory/sequence_compile.py`)
    - `quantize_program_ir()` adjusts segment lengths to hardware constraints:

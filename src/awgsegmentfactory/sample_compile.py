@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .program_ir import PartIR, PlanePartIR, ProgramIR, SegmentIR
+from .program_ir import LogicalChannelPartIR, ProgramIR, SegmentIR
 from .sequence_compile import SegmentQuantizationInfo, quantize_program_ir
 
 
@@ -28,7 +28,7 @@ class SequenceStep:
 @dataclass(frozen=True)
 class CompiledSequenceProgram:
     sample_rate_hz: float
-    plane_to_channel: Dict[str, int]
+    logical_channel_to_hardware_channel: Dict[str, int]
     gain: float
     clip: float
     full_scale: int
@@ -41,8 +41,8 @@ def _smoothstep_min_jerk(u: np.ndarray) -> np.ndarray:
     return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
 
-def _interp_plane_part(
-    pp: PlanePartIR, *, n_samples: int, sample_rate_hz: float
+def _interp_logical_channel_part(
+    pp: LogicalChannelPartIR, *, n_samples: int, sample_rate_hz: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Returns (freqs_hz, amps) as (n_samples, n_tones) arrays.
@@ -53,7 +53,7 @@ def _interp_plane_part(
     a1 = pp.end.amps
 
     if f0.shape != f1.shape or a0.shape != a1.shape:
-        raise ValueError("Start/end shape mismatch for plane part")
+        raise ValueError("Start/end shape mismatch for logical channel part")
 
     n_tones = int(f0.shape[0])
     if n_samples <= 0:
@@ -93,20 +93,20 @@ def _interp_plane_part(
 
 
 def _synth_part(
-    pp: PlanePartIR,
+    pp: LogicalChannelPartIR,
     *,
     n_samples: int,
     sample_rate_hz: float,
     phase0_rad: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Synthesize one plane part.
+    Synthesize one logical-channel part.
 
     Returns (y, phase_end) where:
     - y is (n_samples,) float waveform
     - phase_end is (n_tones,) phase at the end of the part (for carry)
     """
-    freqs, amps = _interp_plane_part(
+    freqs, amps = _interp_logical_channel_part(
         pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz
     )
     if freqs.shape[1] != phase0_rad.shape[0]:
@@ -126,17 +126,17 @@ def _synth_part(
     return y, phase_end
 
 
-def _synth_plane_segment(
+def _synth_logical_channel_segment(
     seg: SegmentIR,
     *,
-    plane: str,
+    logical_channel: str,
     sample_rate_hz: float,
     phase_in: Optional[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
     if not seg.parts:
         return np.zeros((0,), dtype=float), np.zeros((0,), dtype=float)
 
-    first = seg.parts[0].planes[plane]
+    first = seg.parts[0].logical_channels[logical_channel]
     n_tones = int(first.start.freqs_hz.shape[0])
 
     if seg.phase_mode == "carry":
@@ -144,7 +144,7 @@ def _synth_plane_segment(
             phase = first.start.phases_rad.copy()
         elif phase_in.shape != (n_tones,):
             raise ValueError(
-                f"Cannot carry phase into segment {seg.name!r} plane {plane!r}: "
+                f"Cannot carry phase into segment {seg.name!r} logical_channel {logical_channel!r}: "
                 f"tone count changed from {phase_in.shape[0]} to {n_tones}. "
                 "Use phase_mode='fixed' for this segment or keep tone counts constant."
             )
@@ -155,7 +155,7 @@ def _synth_plane_segment(
 
     ys: list[np.ndarray] = []
     for part in seg.parts:
-        pp = part.planes[plane]
+        pp = part.logical_channels[logical_channel]
         y, phase = _synth_part(
             pp,
             n_samples=part.n_samples,
@@ -169,7 +169,7 @@ def _synth_plane_segment(
 def compile_sequence_program(
     ir: ProgramIR,
     *,
-    plane_to_channel: Dict[str, int],
+    logical_channel_to_hardware_channel: Dict[str, int],
     gain: float,
     clip: float,
     full_scale: int,
@@ -192,7 +192,7 @@ def compile_sequence_program(
 
     q_ir, q_info = quantize_program_ir(
         ir,
-        plane_to_channel=plane_to_channel,
+        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         segment_quantum_s=segment_quantum_s,
         step_samples=step_samples,
     )
@@ -201,34 +201,36 @@ def compile_sequence_program(
     if n_segments == 0:
         raise ValueError("No segments to compile")
 
-    n_channels = max(plane_to_channel.values()) + 1
+    n_channels = max(logical_channel_to_hardware_channel.values()) + 1
 
     compiled_segments: list[CompiledSegment] = []
     compiled_steps: list[SequenceStep] = []
 
-    # Phase state carried across segments, per plane.
+    # Phase state carried across segments, per logical channel.
     phase_state: Dict[str, np.ndarray] = {}
 
     for i, seg in enumerate(q_ir.segments):
         n = seg.n_samples
         data = np.zeros((n_channels, n), dtype=np.int16)
 
-        for plane in q_ir.planes:
-            if plane not in plane_to_channel:
-                raise KeyError(f"No channel mapping for plane {plane!r}")
-            ch = int(plane_to_channel[plane])
-            y, phase_out = _synth_plane_segment(
+        for logical_channel in q_ir.logical_channels:
+            if logical_channel not in logical_channel_to_hardware_channel:
+                raise KeyError(
+                    f"No hardware channel mapping for logical_channel {logical_channel!r}"
+                )
+            hw_ch = int(logical_channel_to_hardware_channel[logical_channel])
+            y, phase_out = _synth_logical_channel_segment(
                 seg,
-                plane=plane,
+                logical_channel=logical_channel,
                 sample_rate_hz=q_ir.sample_rate_hz,
-                phase_in=phase_state.get(plane),
+                phase_in=phase_state.get(logical_channel),
             )
-            phase_state[plane] = phase_out
+            phase_state[logical_channel] = phase_out
 
             y = gain * y
             y = np.clip(y, -1.0, 1.0)
             samp = np.round(y * (clip * float(full_scale))).astype(np.int16)
-            data[ch, :] = samp
+            data[hw_ch, :] = samp
 
         compiled_segments.append(
             CompiledSegment(name=seg.name, n_samples=n, data_i16=data)
@@ -248,7 +250,7 @@ def compile_sequence_program(
 
     return CompiledSequenceProgram(
         sample_rate_hz=q_ir.sample_rate_hz,
-        plane_to_channel=dict(plane_to_channel),
+        logical_channel_to_hardware_channel=dict(logical_channel_to_hardware_channel),
         gain=float(gain),
         clip=float(clip),
         full_scale=int(full_scale),

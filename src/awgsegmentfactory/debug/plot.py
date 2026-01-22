@@ -26,8 +26,8 @@ def default_size_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
 def interactive_grid_debug(
     tl: ResolvedTimeline,
     *,
-    plane_h: str = "H",
-    plane_v: str = "V",
+    logical_channel_h: str = "H",
+    logical_channel_v: str = "V",
     fx: Optional[Callable[[np.ndarray], np.ndarray]] = None,
     fy: Optional[Callable[[np.ndarray], np.ndarray]] = None,
     size_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] = default_size_fn,
@@ -70,10 +70,10 @@ def interactive_grid_debug(
 
     out = widgets.Output()
 
-    def _axis_limits_for_plane(
-        plane: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
+    def _axis_limits_for_logical_channel(
+        logical_channel: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
     ) -> Tuple[float, float]:
-        spans = tl.planes.get(plane, [])
+        spans = tl.logical_channels.get(logical_channel, [])
         if not spans:
             return (-1.0, 1.0)
         freqs: list[np.ndarray] = []
@@ -96,8 +96,8 @@ def interactive_grid_debug(
             m = 0.05 * (xmax - xmin)
         return (xmin - m, xmax + m)
 
-    xlim = _axis_limits_for_plane(plane_h, fx)
-    ylim = _axis_limits_for_plane(plane_v, fy)
+    xlim = _axis_limits_for_logical_channel(logical_channel_h, fx)
+    ylim = _axis_limits_for_logical_channel(logical_channel_v, fy)
 
     start_times = [t0 for (t0, _name) in tl.segment_starts]
     start_names = [_name for (_t0, _name) in tl.segment_starts]
@@ -112,8 +112,8 @@ def interactive_grid_debug(
 
     def render_frame(i: int):
         t = float(times[i])
-        sH = tl.state_at(plane_h, t)
-        sV = tl.state_at(plane_v, t)
+        sH = tl.state_at(logical_channel_h, t)
+        sV = tl.state_at(logical_channel_v, t)
 
         xH = fx(sH.freqs_hz)  # (N,)
         yV = fy(sV.freqs_hz)  # (M,)
@@ -129,8 +129,8 @@ def interactive_grid_debug(
             ax.set_title(f"{title} | {seg_name} | t={t * 1e3:.3f} ms")
         else:
             ax.set_title(f"{title} | t={t * 1e3:.3f} ms")
-        ax.set_xlabel(f"{plane_h} position (arb)")
-        ax.set_ylabel(f"{plane_v} position (arb)")
+        ax.set_xlabel(f"{logical_channel_h} position (arb)")
+        ax.set_ylabel(f"{logical_channel_v} position (arb)")
         ax.grid(True)
         ax.scatter(X, Y, s=S, marker="o")
 
