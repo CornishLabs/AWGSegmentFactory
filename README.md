@@ -103,13 +103,26 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/timeline.py`) and `ProgramIR.to_timeline()`
 
-## Composite structures:
+## Structure understanding
 
 'IR' means 'Intermediate Representation'.
 
-On the within the 'program_ir' (the IR which is good for compilation) we have:
-A whole program is represented by:
-`ProgramIR`, which is formed of `SegmentIR`s that themselves are composed of `PartIR`s.
+We call the whole thing we are building up a 'Program'.
+
+The builder defines a nice fluent builder API, that produces an IR formed of dataclasses. We call this product a 'Specification', that is, what you *want* to happen. It might not necessarily be buildable to real hardware, and it doesn't account for hardware details like sample rates, memory limits, etc... It does however need to contain the (metadata at this point) information about what future stages should do about hardware implementation that has an intentful decision that effects how it would operate in an experiment. It also has to be at the level that the points moving around we're describing have some linear position/frequency  relation, a phase associated with them, and an amplitude associated with them. In this code, this is the `ProgramSpec` class. This is primarily formed of `SegmentSpec`s which are formed of 'operations' (`Op`s). 
+
+This is then turned into a more verbose, but still logical, implementation plan at this point, some hardware considerations have been made. That is the 'program_ir' (the IR which is good for compilation) we have:
+A whole program is now represented by:
+`ProgramIR`, which is formed of `SegmentIR`s that themselves are composed of `PartIR`s, which are composed of `LogicalChannelPartIR` (what each channel does in this part).
+
+The transformation of a `ProgramSpec` to a `ProgramIR` is done by the `resolve_program_ir()`.
+
+(to be honest, this is a quite awkward middle ground point...)
+
+This is then further refined to hardware implementation by quantising everything to the quanta dictated by sensible hardware implementation. This is done by a function `quantize_program_ir()` which maps: `ProgramIR` -> `ProgramIR` and also outputs some quantisation metadata (`SegmentQuantizationInfo`). At this point we have an IR that is primed to produce AWG Samples to go into the hardware's RAM.
+
+Interpretation of the `ProgramIR` to produce samples is done by `compile_sequence_program()` which maps `ProgramIR` and some hardware considerations to `CompiledSequenceProgram`. This contains the 'segments' and 'steps' information in the form of lists of `CompiledSegment` and `SequenceStep` respectively. This maps directly to the nature if the hardware where `[CompiledSegment]` is the data memory, and `[SequenceStep]` is the sequence memory.
+
 
 ## Repository guide (reading order)
 
