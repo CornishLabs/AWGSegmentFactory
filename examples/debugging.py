@@ -23,8 +23,9 @@ def _maybe_enable_matplotlib_widget_backend() -> None:
 
 _maybe_enable_matplotlib_widget_backend()
 # %%
+fs = 625e6
 prog = (
-    AWGProgramBuilder(sample_rate=625e6)
+    AWGProgramBuilder()
     .logical_channel("H")
     .logical_channel("V")
     .define(
@@ -94,7 +95,7 @@ prog = (
     .move(df=(-2e6 + 1e5), time=1, idxs=[0])
     .segment("wait_for_trigger_D", mode="wait_trig")
     .hold(time=1)
-    .build()
+    .build_timeline(sample_rate_hz=fs)
 )
 
 

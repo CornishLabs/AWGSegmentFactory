@@ -3,8 +3,9 @@ import numpy as np
 
 cal = LinearPositionToFreqCalib(slope_hz_per_um=250e3)  # example: 250 kHz / µm
 
+fs = 625e6  # 625MHz
 ir = (
-    AWGProgramBuilder(sample_rate=625e6)  # 625MHz
+    AWGProgramBuilder()
     .with_calibration("pos_to_df", cal)
     .logical_channel("H")
     .logical_channel("V")
@@ -97,7 +98,7 @@ ir = (
     # 12) Final wait
     .segment("wait_for_trigger_D", mode="wait_trig")
     .hold(time=200e-6)
-    .build_ir()
+    .build_resolved_ir(sample_rate_hz=fs)
 )
 
 

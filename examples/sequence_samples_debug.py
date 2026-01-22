@@ -28,7 +28,7 @@ def main() -> None:
     fs = 625e6
 
     ir = (
-        AWGProgramBuilder(sample_rate=fs)
+        AWGProgramBuilder()
         .logical_channel("H")
         .logical_channel("V")
         .define("H0", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
@@ -52,7 +52,7 @@ def main() -> None:
         .hold(time=40e-6)
         .segment("wait2", mode="wait_trig")
         .hold(time=200e-6)
-        .build_ir()
+        .build_resolved_ir(sample_rate_hz=fs)
     )
 
     fig, axs, slider = sequence_samples_debug(

@@ -5,7 +5,12 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .program_ir import PartIR, LogicalChannelPartIR, ProgramIR, SegmentIR
+from .program_ir import (
+    ResolvedIR,
+    ResolvedLogicalChannelPart,
+    ResolvedPart,
+    ResolvedSegment,
+)
 from .timeline import LogicalChannelState
 
 
@@ -28,6 +33,30 @@ class SegmentQuantizationInfo:
     @property
     def quantized_s(self) -> float:
         return self.quantized_samples / self.sample_rate_hz
+
+
+@dataclass(frozen=True)
+class QuantizedIR:
+    """Output of `quantize_resolved_ir`: a resolved IR plus quantization metadata."""
+
+    ir: ResolvedIR
+    logical_channel_to_hardware_channel: Dict[str, int]
+    quantization: tuple[SegmentQuantizationInfo, ...]
+
+    @property
+    def sample_rate_hz(self) -> float:
+        return float(self.ir.sample_rate_hz)
+
+    @property
+    def logical_channels(self) -> tuple[str, ...]:
+        return self.ir.logical_channels
+
+    @property
+    def segments(self) -> tuple[ResolvedSegment, ...]:
+        return self.ir.segments
+
+    def to_timeline(self):
+        return self.ir.to_timeline()
 
 
 def format_samples_time(
@@ -92,7 +121,7 @@ def min_segment_samples_per_channel(*, n_channels: int) -> int:
     return 384 // n_channels
 
 
-def _segment_is_constant(seg: SegmentIR, logical_channel: str) -> bool:
+def _segment_is_constant(seg: ResolvedSegment, logical_channel: str) -> bool:
     """
     True if a segment is a pure hold for the given logical channel: no parameter changes
     across time, so it can be repeated without discontinuities (aside from phase wrap).
@@ -132,13 +161,13 @@ def _snap_freqs_to_wrap(
     return k / seg_len_s
 
 
-def quantize_program_ir(
-    ir: ProgramIR,
+def quantize_resolved_ir(
+    ir: ResolvedIR,
     *,
     logical_channel_to_hardware_channel: Dict[str, int],
     segment_quantum_s: float = 40e-6,
     step_samples: int = 32,
-) -> tuple[ProgramIR, list[SegmentQuantizationInfo]]:
+) -> QuantizedIR:
     """
     Quantise segments for Spectrum sequence mode constraints.
 
@@ -157,7 +186,7 @@ def quantize_program_ir(
     min_samples = _ceil_to_multiple(min_samples, step_samples)
 
     infos: list[SegmentQuantizationInfo] = []
-    out_segments: list[SegmentIR] = []
+    out_segments: list[ResolvedSegment] = []
 
     for seg in ir.segments:
         loopable = seg.mode == "wait_trig" or seg.loop > 1
@@ -194,7 +223,7 @@ def quantize_program_ir(
             )
         )
 
-        parts: list[PartIR] = list(seg.parts)
+        parts: list[ResolvedPart] = list(seg.parts)
         n_parts = sum(p.n_samples for p in parts)
         if n_parts != n0:  # pragma: no cover
             raise RuntimeError("Segment parts/sample count mismatch")
@@ -204,17 +233,19 @@ def quantize_program_ir(
             # Pad segment to `n1` by appending a hold part at the end.
             if not parts:
                 raise RuntimeError(
-                    "resolve_program_ir produced a segment with no parts"
+                    "resolve_intent_ir produced a segment with no parts"
                 )
             hold_logical_channels = {
-                lc: LogicalChannelPartIR(
+                lc: ResolvedLogicalChannelPart(
                     start=parts[-1].logical_channels[lc].end,
                     end=parts[-1].logical_channels[lc].end,
                     interp="hold",
                 )
                 for lc in ir.logical_channels
             }
-            parts.append(PartIR(n_samples=extra, logical_channels=hold_logical_channels))
+            parts.append(
+                ResolvedPart(n_samples=extra, logical_channels=hold_logical_channels)
+            )
         elif extra < 0:
             # Shorten only constant loopable segments (safe to truncate holds).
             if not constant:
@@ -223,7 +254,7 @@ def quantize_program_ir(
                     f"from {n0} to {n1} samples. Make it constant or increase duration."
                 )
             keep = n1
-            trimmed: list[PartIR] = []
+            trimmed: list[ResolvedPart] = []
             for part in parts:
                 if keep <= 0:
                     break
@@ -232,7 +263,7 @@ def quantize_program_ir(
                     keep -= part.n_samples
                 else:
                     trimmed.append(
-                        PartIR(n_samples=keep, logical_channels=part.logical_channels)
+                        ResolvedPart(n_samples=keep, logical_channels=part.logical_channels)
                     )
                     keep = 0
             parts = trimmed
@@ -242,9 +273,9 @@ def quantize_program_ir(
         # For loopable constant segments, snap freqs to wrap for the final length.
         if loopable and constant:
             seg_len = n1
-            new_parts: list[PartIR] = []
+            new_parts: list[ResolvedPart] = []
             for part in parts:
-                new_logical_channels: Dict[str, LogicalChannelPartIR] = {}
+                new_logical_channels: Dict[str, ResolvedLogicalChannelPart] = {}
                 for lc in ir.logical_channels:
                     pp = part.logical_channels[lc]
                     snapped = _snap_freqs_to_wrap(
@@ -253,11 +284,11 @@ def quantize_program_ir(
                     st = LogicalChannelState(
                         snapped, pp.start.amps.copy(), pp.start.phases_rad.copy()
                     )
-                    new_logical_channels[lc] = LogicalChannelPartIR(
+                    new_logical_channels[lc] = ResolvedLogicalChannelPart(
                         start=st, end=st, interp="hold"
                     )
                 new_parts.append(
-                    PartIR(
+                    ResolvedPart(
                         n_samples=part.n_samples,
                         logical_channels=new_logical_channels,
                     )
@@ -265,7 +296,7 @@ def quantize_program_ir(
             parts = new_parts
 
         out_segments.append(
-            SegmentIR(
+            ResolvedSegment(
                 name=seg.name,
                 mode=seg.mode,
                 loop=seg.loop,
@@ -274,11 +305,13 @@ def quantize_program_ir(
             )
         )
 
-    return (
-        ProgramIR(
-            sample_rate_hz=fs,
-            logical_channels=ir.logical_channels,
-            segments=tuple(out_segments),
-        ),
-        infos,
+    q_ir = ResolvedIR(
+        sample_rate_hz=fs,
+        logical_channels=ir.logical_channels,
+        segments=tuple(out_segments),
+    )
+    return QuantizedIR(
+        ir=q_ir,
+        logical_channel_to_hardware_channel=dict(logical_channel_to_hardware_channel),
+        quantization=tuple(infos),
     )

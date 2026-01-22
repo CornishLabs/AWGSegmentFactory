@@ -5,8 +5,8 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .program_ir import LogicalChannelPartIR, ProgramIR, SegmentIR
-from .sequence_compile import SegmentQuantizationInfo, quantize_program_ir
+from .program_ir import ResolvedLogicalChannelPart, ResolvedSegment
+from .sequence_compile import QuantizedIR, SegmentQuantizationInfo
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ def _smoothstep_min_jerk(u: np.ndarray) -> np.ndarray:
 
 
 def _interp_logical_channel_part(
-    pp: LogicalChannelPartIR, *, n_samples: int, sample_rate_hz: float
+    pp: ResolvedLogicalChannelPart, *, n_samples: int, sample_rate_hz: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Returns (freqs_hz, amps) as (n_samples, n_tones) arrays.
@@ -93,7 +93,7 @@ def _interp_logical_channel_part(
 
 
 def _synth_part(
-    pp: LogicalChannelPartIR,
+    pp: ResolvedLogicalChannelPart,
     *,
     n_samples: int,
     sample_rate_hz: float,
@@ -127,7 +127,7 @@ def _synth_part(
 
 
 def _synth_logical_channel_segment(
-    seg: SegmentIR,
+    seg: ResolvedSegment,
     *,
     logical_channel: str,
     sample_rate_hz: float,
@@ -167,17 +167,14 @@ def _synth_logical_channel_segment(
 
 
 def compile_sequence_program(
-    ir: ProgramIR,
+    quantized: QuantizedIR,
     *,
-    logical_channel_to_hardware_channel: Dict[str, int],
     gain: float,
     clip: float,
     full_scale: int,
-    segment_quantum_s: float = 40e-6,
-    step_samples: int = 32,
 ) -> CompiledSequenceProgram:
     """
-    Compile a ProgramIR into per-segment, per-channel int16 sample arrays suitable
+    Compile a QuantizedIR into per-segment, per-channel int16 sample arrays suitable
     for writing into an AWG "sequence mode" pattern memory.
     """
     if gain <= 0:
@@ -190,12 +187,9 @@ def compile_sequence_program(
     if full_scale > max_i16:
         raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
 
-    q_ir, q_info = quantize_program_ir(
-        ir,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-        segment_quantum_s=segment_quantum_s,
-        step_samples=step_samples,
-    )
+    q_ir = quantized.ir
+    logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
+    q_info = quantized.quantization
 
     n_segments = len(q_ir.segments)
     if n_segments == 0:

@@ -2,11 +2,12 @@
 Show the different "depths" of compilation for AWGSegmentFactory:
 
 1) Builder (high-level user intent)
-2) ProgramSpec (intent IR / recorded ops)
-3) ProgramIR (segment-grouped, sample-quantised primitives)
-4) ResolvedTimeline (debug view for plotting / state queries)
+2) IntentIR (continuous-time intent / recorded ops)
+3) ResolvedIR (integer-sample primitives, ready for quantization)
+4) QuantizedIR (hardware-aligned segment sizes + wrap snapping)
+5) ResolvedTimeline (debug view for plotting / state queries)
 
-This is also a sketch of how a NumPy/CuPy backend could turn `ProgramIR`
+This is also a sketch of how a NumPy/CuPy backend could turn `ResolvedIR`
 parts into vectorised arrays (freq/amp/phase per sample).
 """
 
@@ -16,24 +17,23 @@ from dataclasses import asdict
 from typing import Tuple
 
 import numpy as np
-import warnings
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.program_ir import LogicalChannelPartIR
+from awgsegmentfactory.program_ir import ResolvedLogicalChannelPart
+from awgsegmentfactory.sequence_compile import quantize_resolved_ir
 
 
-def _describe_spec(spec) -> None:
-    print("\n== ProgramSpec (intent IR) ==")
-    print(f"sample_rate_hz: {spec.sample_rate_hz}")
-    print(f"logical_channels: {spec.logical_channels}")
-    print(f"definitions: {list(spec.definitions.keys())}")
-    for seg in spec.segments:
+def _describe_intent(intent) -> None:
+    print("\n== IntentIR (continuous-time intent) ==")
+    print(f"logical_channels: {intent.logical_channels}")
+    print(f"definitions: {list(intent.definitions.keys())}")
+    for seg in intent.segments:
         op_names = [type(op).__name__ for op in seg.ops]
         print(f"- segment {seg.name!r}: mode={seg.mode} loop={seg.loop} ops={op_names}")
 
 
 def _describe_ir(ir) -> None:
-    print("\n== ProgramIR (primitives) ==")
+    print("\n== ResolvedIR (integer-sample primitives) ==")
     print(
         f"segments: {len(ir.segments)} | total_samples: {ir.n_samples} | duration_s: {ir.duration_s:.6f}"
     )
@@ -51,13 +51,13 @@ def _interp_min_jerk(u: np.ndarray) -> np.ndarray:
 
 
 def _logical_channel_part_to_arrays(
-    pp: LogicalChannelPartIR,
+    pp: ResolvedLogicalChannelPart,
     *,
     n_samples: int,
     sample_rate_hz: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Vectorise a LogicalChannelPartIR into per-sample arrays (freqs/amps/phases).
+    Vectorise a ResolvedLogicalChannelPart into per-sample arrays (freqs/amps/phases).
 
     Notes:
     - This is a *demonstration*; the final AWG compiler will want to define a precise
@@ -136,7 +136,7 @@ def main() -> None:
     fs = 10.0  # small so sample rounding is obvious
 
     # ---- 1) Builder (high-level intent) ----
-    b = AWGProgramBuilder(sample_rate=fs).logical_channel("H").logical_channel("V")
+    b = AWGProgramBuilder().logical_channel("H").logical_channel("V")
     b.define(
         "init_H", logical_channel="H", freqs=[7.0, 9.0], amps=[1.0, 0.5], phases="auto"
     )
@@ -155,20 +155,23 @@ def main() -> None:
         amps=0.0, time=0.2, kind="exp", tau=0.1
     )  # 0.2s -> 2 samples
 
-    # ---- 2) ProgramSpec (intent IR) ----
-    spec = b.build_spec()
-    _describe_spec(spec)
+    # ---- 2) IntentIR (recorded ops) ----
+    intent = b.build_intent_ir()
+    _describe_intent(intent)
 
-    # ---- 3) ProgramIR (segment-grouped primitives) ----
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        ir = b.build_ir()
+    # ---- 3) ResolvedIR (segment-grouped primitives) ----
+    ir = b.build_resolved_ir(sample_rate_hz=fs)
     _describe_ir(ir)
-    if w:
-        for ww in w:
-            print(f"[warning] {ww.message}")
 
-    # ---- 4) ResolvedTimeline (debug view) ----
+    # ---- 4) QuantizedIR (hardware-aligned) ----
+    q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0, "V": 1})
+    print("\n== QuantizedIR (hardware-aligned) ==")
+    for qi in q.quantization:
+        print(
+            f"- {qi.name!r}: {qi.original_samples} -> {qi.quantized_samples} samples | loopable={qi.loopable}"
+        )
+
+    # ---- 5) ResolvedTimeline (debug view) ----
     tl = ir.to_timeline()
     print("\n== ResolvedTimeline (debug view) ==")
     print(f"t_end: {tl.t_end:.6f}s | segment_starts: {tl.segment_starts}")

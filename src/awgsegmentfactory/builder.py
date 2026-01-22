@@ -2,19 +2,19 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .ir import (
-    ProgramSpec,
-    SegmentSpec,
+    IntentIR,
+    IntentSegment,
     SegmentMode,
     SegmentPhaseMode,
-    DefinitionSpec,
+    IntentDefinition,
     HoldOp,
     UseDefOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
 )
-from .program_ir import ProgramIR
-from .resolve import resolve_program, resolve_program_ir
+from .program_ir import ResolvedIR
+from .resolve import resolve_intent_ir
 
 
 def _phases_auto(n: int) -> Tuple[float, ...]:
@@ -134,7 +134,18 @@ class ToneView:
         return self._b.hold(time=time, warn_df=warn_df)
 
     def build(self):
-        return self._b.build()
+        raise AttributeError(
+            "Use build_intent_ir(), build_resolved_ir(...), or build_timeline(...) on the builder."
+        )
+
+    def build_intent_ir(self) -> IntentIR:
+        return self._b.build_intent_ir()
+
+    def build_resolved_ir(self, *, sample_rate_hz: float) -> ResolvedIR:
+        return self._b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
+
+    def build_timeline(self, *, sample_rate_hz: float):
+        return self._b.build_timeline(sample_rate_hz=sample_rate_hz)
 
 
 class AWGProgramBuilder:
@@ -148,13 +159,10 @@ class AWGProgramBuilder:
       boundaries; `time=0` ops update state without advancing time.
     """
 
-    def __init__(self, sample_rate: float):
-        if sample_rate <= 0:
-            raise ValueError("sample_rate must be > 0")
-        self._fs = float(sample_rate)
+    def __init__(self):
         self._logical_channels: List[str] = []
-        self._definitions: Dict[str, DefinitionSpec] = {}
-        self._segments: List[SegmentSpec] = []
+        self._definitions: Dict[str, IntentDefinition] = {}
+        self._segments: List[IntentSegment] = []
         self._current_seg: Optional[int] = None
         self._calibrations: Dict[str, Any] = {}
 
@@ -193,7 +201,7 @@ class AWGProgramBuilder:
                 raise ValueError("define: phases length mismatch")
             ph = tuple(float(x) for x in phases)
 
-        self._definitions[name] = DefinitionSpec(
+        self._definitions[name] = IntentDefinition(
             name=name,
             logical_channel=logical_channel,
             freqs_hz=tuple(float(x) for x in freqs),
@@ -226,7 +234,7 @@ class AWGProgramBuilder:
             raise ValueError(f"Unknown phase_mode {phase_mode!r}")
 
         self._segments.append(
-            SegmentSpec(
+            IntentSegment(
                 name=name, mode=mode, loop=int(loop), ops=tuple(), phase_mode=phase_mode
             )
         )
@@ -257,7 +265,7 @@ class AWGProgramBuilder:
         if self._current_seg is None:
             raise RuntimeError("Call .segment(...) before adding ops")
         seg = self._segments[self._current_seg]
-        self._segments[self._current_seg] = SegmentSpec(
+        self._segments[self._current_seg] = IntentSegment(
             name=seg.name,
             mode=seg.mode,
             loop=seg.loop,
@@ -265,21 +273,18 @@ class AWGProgramBuilder:
             phase_mode=seg.phase_mode,
         )
 
-    def build_spec(self) -> ProgramSpec:
+    def build_intent_ir(self) -> IntentIR:
         if not self._segments:
             raise RuntimeError("No segments defined")
-        return ProgramSpec(
-            sample_rate_hz=self._fs,
+        return IntentIR(
             logical_channels=tuple(self._logical_channels),
             definitions=dict(self._definitions),
             segments=tuple(self._segments),
             calibrations=dict(self._calibrations),
         )
 
-    def build(self):
-        spec = self.build_spec()
-        return resolve_program(spec)
+    def build_timeline(self, *, sample_rate_hz: float):
+        return self.build_resolved_ir(sample_rate_hz=sample_rate_hz).to_timeline()
 
-    def build_ir(self) -> ProgramIR:
-        spec = self.build_spec()
-        return resolve_program_ir(spec)
+    def build_resolved_ir(self, *, sample_rate_hz: float) -> ResolvedIR:
+        return resolve_intent_ir(self.build_intent_ir(), sample_rate_hz=sample_rate_hz)

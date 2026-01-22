@@ -3,15 +3,20 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 
 from .ir import (
-    ProgramSpec,
+    IntentIR,
     HoldOp,
     UseDefOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
 )
-from .program_ir import ProgramIR, SegmentIR, PartIR, LogicalChannelPartIR
-from .timeline import LogicalChannelState, ResolvedTimeline
+from .program_ir import (
+    ResolvedIR,
+    ResolvedLogicalChannelPart,
+    ResolvedPart,
+    ResolvedSegment,
+)
+from .timeline import LogicalChannelState
 
 
 def _empty_state() -> LogicalChannelState:
@@ -38,54 +43,56 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
 
 
 def _hold_parts(
-    spec: ProgramSpec, cur: Dict[str, LogicalChannelState]
-) -> Dict[str, LogicalChannelPartIR]:
+    intent: IntentIR, cur: Dict[str, LogicalChannelState]
+) -> Dict[str, ResolvedLogicalChannelPart]:
     return {
-        lc: LogicalChannelPartIR(start=cur[lc], end=cur[lc], interp="hold")
-        for lc in spec.logical_channels
+        lc: ResolvedLogicalChannelPart(start=cur[lc], end=cur[lc], interp="hold")
+        for lc in intent.logical_channels
     }
 
 
 def _append_target_part(
-    parts: List[PartIR],
+    parts: List[ResolvedPart],
     *,
-    spec: ProgramSpec,
+    intent: IntentIR,
     cur: Dict[str, LogicalChannelState],
     n_samples: int,
     logical_channel: str,
-    target_part: LogicalChannelPartIR,
+    target_part: ResolvedLogicalChannelPart,
 ) -> None:
     if n_samples <= 0:
         return
-    logical_channels = _hold_parts(spec, cur)
+    logical_channels = _hold_parts(intent, cur)
     logical_channels[logical_channel] = target_part
-    parts.append(PartIR(n_samples=n_samples, logical_channels=logical_channels))
+    parts.append(ResolvedPart(n_samples=n_samples, logical_channels=logical_channels))
 
 
-def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
+def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
     """
-    Resolve a ProgramSpec into a fully-explicit ProgramIR.
+    Resolve an IntentIR into a fully-explicit ResolvedIR (integer-sample primitives).
 
     Guarantees:
     - state is carried across segment boundaries (no implicit resets)
-    - every timed op produces a PartIR containing *all* logical channels
+    - every timed op produces a ResolvedPart containing *all* logical channels
     - `time=0` ops update state without advancing time
     """
-    fs = spec.sample_rate_hz
+    fs = float(sample_rate_hz)
+    if fs <= 0:
+        raise ValueError("sample_rate_hz must be > 0")
 
     # current per-logical-channel state
     cur: Dict[str, LogicalChannelState] = {
-        lc: _empty_state() for lc in spec.logical_channels
+        lc: _empty_state() for lc in intent.logical_channels
     }
-    segments: List[SegmentIR] = []
+    segments: List[ResolvedSegment] = []
 
-    for seg in spec.segments:
-        parts: List[PartIR] = []
+    for seg in intent.segments:
+        parts: List[ResolvedPart] = []
         seg_samples = 0
 
         for op in seg.ops:
             if isinstance(op, UseDefOp):
-                d = spec.definitions[op.def_name]
+                d = intent.definitions[op.def_name]
                 if d.logical_channel != op.logical_channel:
                     raise ValueError(
                         f"Definition {d.name} is for logical_channel {d.logical_channel}, "
@@ -100,7 +107,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 continue
 
             if isinstance(op, RemapFromDefOp):
-                d = spec.definitions[op.target_def]
+                d = intent.definitions[op.target_def]
                 if d.logical_channel != op.logical_channel:
                     raise ValueError(
                         f"Definition {d.name} is for logical_channel {d.logical_channel}, "
@@ -129,11 +136,11 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 if n > 0:
                     _append_target_part(
                         parts,
-                        spec=spec,
+                        intent=intent,
                         cur=cur,
                         n_samples=n,
                         logical_channel=op.logical_channel,
-                        target_part=LogicalChannelPartIR(
+                        target_part=ResolvedLogicalChannelPart(
                             start=LogicalChannelState(sf, sa, sp),
                             end=end,
                             interp=op.kind,
@@ -161,11 +168,11 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 if n > 0:
                     _append_target_part(
                         parts,
-                        spec=spec,
+                        intent=intent,
                         cur=cur,
                         n_samples=n,
                         logical_channel=op.logical_channel,
-                        target_part=LogicalChannelPartIR(
+                        target_part=ResolvedLogicalChannelPart(
                             start=start, end=end, interp=op.kind
                         ),
                     )
@@ -201,11 +208,11 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 if n > 0:
                     _append_target_part(
                         parts,
-                        spec=spec,
+                        intent=intent,
                         cur=cur,
                         n_samples=n,
                         logical_channel=op.logical_channel,
-                        target_part=LogicalChannelPartIR(
+                        target_part=ResolvedLogicalChannelPart(
                             start=start,
                             end=end,
                             interp=op.kind,
@@ -225,7 +232,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
 
                 # Hold applies to all logical channels (continuous timeline)
                 parts.append(
-                    PartIR(n_samples=n, logical_channels=_hold_parts(spec, cur))
+                    ResolvedPart(n_samples=n, logical_channels=_hold_parts(intent, cur))
                 )
                 seg_samples += n
                 continue
@@ -241,7 +248,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
             )
 
         segments.append(
-            SegmentIR(
+            ResolvedSegment(
                 name=seg.name,
                 mode=seg.mode,
                 loop=seg.loop,
@@ -250,12 +257,8 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
             )
         )
 
-    return ProgramIR(
+    return ResolvedIR(
         sample_rate_hz=fs,
-        logical_channels=spec.logical_channels,
+        logical_channels=intent.logical_channels,
         segments=tuple(segments),
     )
-
-
-def resolve_program(spec: ProgramSpec) -> ResolvedTimeline:
-    return resolve_program_ir(spec).to_timeline()

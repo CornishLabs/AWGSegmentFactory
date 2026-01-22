@@ -3,15 +3,15 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory.program_ir import (
-    LogicalChannelPartIR,
-    PartIR,
-    ProgramIR,
-    SegmentIR,
+    ResolvedIR,
+    ResolvedLogicalChannelPart,
+    ResolvedPart,
+    ResolvedSegment,
 )
 from awgsegmentfactory.sequence_compile import (
     format_samples_time,
     quantum_samples,
-    quantize_program_ir,
+    quantize_resolved_ir,
 )
 from awgsegmentfactory.timeline import LogicalChannelState
 
@@ -35,16 +35,16 @@ class TestSequenceCompile(unittest.TestCase):
         st = LogicalChannelState(
             freqs_hz=np.array([10.0]), amps=np.array([1.0]), phases_rad=np.array([0.0])
         )
-        seg = SegmentIR(
+        seg = ResolvedSegment(
             name="seg",
             mode="loop_n",
             loop=1,
             parts=(
-                PartIR(
+                ResolvedPart(
                     n_samples=193,
                     logical_channels={
-                        "H": LogicalChannelPartIR(start=st, end=st, interp="hold"),
-                        "V": LogicalChannelPartIR(
+                        "H": ResolvedLogicalChannelPart(start=st, end=st, interp="hold"),
+                        "V": ResolvedLogicalChannelPart(
                             start=_empty_logical_channel_state(),
                             end=_empty_logical_channel_state(),
                             interp="hold",
@@ -53,11 +53,13 @@ class TestSequenceCompile(unittest.TestCase):
                 ),
             ),
         )
-        ir = ProgramIR(sample_rate_hz=fs, logical_channels=("H", "V"), segments=(seg,))
+        ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H", "V"), segments=(seg,))
 
-        q_ir, info = quantize_program_ir(
+        quantized = quantize_resolved_ir(
             ir, logical_channel_to_hardware_channel={"H": 0, "V": 1}
         )
+        q_ir = quantized.ir
+        info = quantized.quantization
         self.assertEqual(info[0].original_samples, 193)
         self.assertEqual(info[0].quantized_samples, 224)
         self.assertEqual(q_ir.segments[0].n_samples, 224)
@@ -76,29 +78,32 @@ class TestSequenceCompile(unittest.TestCase):
         )
         empty = _empty_logical_channel_state()
 
-        seg = SegmentIR(
+        seg = ResolvedSegment(
             name="wait",
             mode="wait_trig",
             loop=1,
             parts=(
-                PartIR(
+                ResolvedPart(
                     n_samples=110,
                     logical_channels={
-                        "H": LogicalChannelPartIR(start=st, end=st, interp="hold"),
-                        "V": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "A": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "B": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(start=st, end=st, interp="hold"),
+                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
                     },
                 ),
             ),
         )
-        ir = ProgramIR(
+        ir = ResolvedIR(
             sample_rate_hz=fs, logical_channels=("H", "V", "A", "B"), segments=(seg,)
         )
 
-        q_ir, info = quantize_program_ir(
-            ir, logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3}
+        quantized = quantize_resolved_ir(
+            ir,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
         )
+        q_ir = quantized.ir
+        info = quantized.quantization
 
         # 110 rounded to nearest multiple of 32 -> 96, and 4 active channels -> min segment is 96.
         self.assertEqual(info[0].original_samples, 110)

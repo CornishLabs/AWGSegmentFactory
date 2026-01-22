@@ -30,7 +30,7 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 ### `builder.py`
 
 **Intent:** ergonomic API.
-**Does:** collects user calls (`segment()`, `tones()`, `move()`, `hold()`, etc.) into a **ProgramSpec** (a list of segments + ops).
+**Does:** collects user calls (`segment()`, `tones()`, `move()`, `hold()`, etc.) into an **IntentIR** (a list of segments + ops).
 **Should NOT do:** heavy computation, snapping, interpolation math, sampling.
 
 ### `ir.py`
@@ -65,7 +65,7 @@ This is where the “state should carry across segments” rule is enforced.
 ### `__init__.py`
 
 **Intent:** clean public API surface.
-**Does:** re-exports `AWGProgramBuilder`, calibration objects, and optionally `ProgramIR` / debug helpers.
+**Does:** re-exports `AWGProgramBuilder`, calibration objects, and the main IR/stage functions.
 
 ---
 
@@ -89,7 +89,7 @@ A standalone, composable **AWG program “factory”** that lets you write reada
 
 ```python
 prog = (
-  AWGProgramBuilder(sample_rate=625e6)
+  AWGProgramBuilder()
     .logical_channel("H").logical_channel("V")
     .define("loading_H", logical_channel="H", freqs=[...], amps=[...], phases="auto")
     ...
@@ -97,7 +97,7 @@ prog = (
       .tones("V").move(df=2e6, time=1.0, idxs=[0])
     .segment("wait_for_trigger_B", mode="wait_trig")
       .hold(time=1.0)
-    .build()
+    .build_resolved_ir(sample_rate_hz=625e6)
 )
 ```
 
@@ -167,7 +167,7 @@ This lets you iterate quickly in a notebook: edit builder code → run cell → 
 
 Resolved IR is “flat and explicit”, no dependence on builder chain:
 
-* `ProgramIR(sample_rate_hz, segments=[ResolvedSegment...])`
+* `ResolvedIR(sample_rate_hz, segments=[ResolvedSegment...])`
 * `ResolvedSegment(name, mode, loop, parts=[ResolvedPart...], start_state, end_state)`
 * `ResolvedPart(duration_s, interp_kind, start_state, end_state, metadata...)`
 * `State` contains per logical channel:
@@ -264,14 +264,14 @@ No need to put everything in `host_setup()`; `prepare_point` is the correct hook
 1. **Fix/ensure state propagation** across segments (no resets unless `use_def` is called).
 2. IR structures:
 
-   * `ir.py`: dataclasses for `ProgramSpec`, `SegmentSpec`, ops; and `ProgramIR`, `ResolvedSegment`, `ResolvedPart`, `State`.
+   * `ir.py`: dataclasses for `IntentIR`, `IntentSegment`, ops; and `ResolvedIR`, `ResolvedSegment`, `ResolvedPart`, `State`.
 3. Resolver:
 
    * `resolve.py`: apply ops into a persistent `current_state` across segments.
    * implement hold snapping for wait_trig segments.
 4. Debug tools:
 
-   * `debug_plot.py`: produce fixed-axis 2D scatter + slider from `ProgramIR`.
+   * `debug/plot.py`: produce fixed-axis 2D scatter + slider from `ResolvedIR`.
 5. Notebook workflow:
 
    * example notebook cell: build program → `ir = prog.ir` → `show_debug(ir, ...)`

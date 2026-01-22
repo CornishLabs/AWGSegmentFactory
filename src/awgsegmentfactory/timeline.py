@@ -83,7 +83,7 @@ class ResolvedTimeline:
     Debug view of a resolved program as per-logical-channel time spans.
 
     This is intended for plotting / inspection (e.g. `state_at(...)`). The "real"
-    compiler input is `ProgramIR`.
+    compiler input is `ResolvedIR`.
     """
 
     sample_rate_hz: float

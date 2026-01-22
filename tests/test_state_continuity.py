@@ -3,33 +3,32 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory.ir import (
-    DefinitionSpec,
+    IntentDefinition,
     HoldOp,
     MoveOp,
-    ProgramSpec,
+    IntentIR,
     RampAmpToOp,
-    SegmentSpec,
+    IntentSegment,
     UseDefOp,
 )
-from awgsegmentfactory.resolve import resolve_program
+from awgsegmentfactory.resolve import resolve_intent_ir
 
 
 class TestStateContinuity(unittest.TestCase):
     def test_spans_are_continuous_and_state_propagates(self) -> None:
         fs = 4.0  # dt=0.25s (exact), makes time comparisons stable.
 
-        spec = ProgramSpec(
-            sample_rate_hz=fs,
+        intent = IntentIR(
             logical_channels=("H", "V"),
             definitions={
-                "dH": DefinitionSpec(
+                "dH": IntentDefinition(
                     name="dH",
                     logical_channel="H",
                     freqs_hz=(100.0,),
                     amps=(1.0,),
                     phases_rad=(0.0,),
                 ),
-                "dV": DefinitionSpec(
+                "dV": IntentDefinition(
                     name="dV",
                     logical_channel="V",
                     freqs_hz=(200.0,),
@@ -38,7 +37,7 @@ class TestStateContinuity(unittest.TestCase):
                 ),
             },
             segments=(
-                SegmentSpec(
+                IntentSegment(
                     name="init",
                     mode="loop_n",
                     loop=1,
@@ -48,7 +47,7 @@ class TestStateContinuity(unittest.TestCase):
                         HoldOp(time_s=1.0),
                     ),
                 ),
-                SegmentSpec(
+                IntentSegment(
                     name="move_row_up",
                     mode="loop_n",
                     loop=1,
@@ -58,13 +57,13 @@ class TestStateContinuity(unittest.TestCase):
                         ),
                     ),
                 ),
-                SegmentSpec(
+                IntentSegment(
                     name="wait_for_trigger_B",
                     mode="wait_trig",
                     loop=1,
                     ops=(HoldOp(time_s=1.0),),
                 ),
-                SegmentSpec(
+                IntentSegment(
                     name="ramp_off",
                     mode="loop_n",
                     loop=1,
@@ -73,7 +72,7 @@ class TestStateContinuity(unittest.TestCase):
                         RampAmpToOp(logical_channel="V", amps_target=0.0, time_s=1.0),
                     ),
                 ),
-                SegmentSpec(
+                IntentSegment(
                     name="move_back",
                     mode="loop_n",
                     loop=1,
@@ -87,7 +86,7 @@ class TestStateContinuity(unittest.TestCase):
             calibrations={},
         )
 
-        tl = resolve_program(spec)
+        tl = resolve_intent_ir(intent, sample_rate_hz=fs).to_timeline()
 
         # State continuity checks inside intervals where (previously) the logical channel had no spans.
         sH_while_V_moves = tl.state_at("H", 1.5)

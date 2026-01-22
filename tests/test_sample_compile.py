@@ -3,12 +3,13 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory.program_ir import (
-    LogicalChannelPartIR,
-    PartIR,
-    ProgramIR,
-    SegmentIR,
+    ResolvedIR,
+    ResolvedLogicalChannelPart,
+    ResolvedPart,
+    ResolvedSegment,
 )
 from awgsegmentfactory.sample_compile import compile_sequence_program
+from awgsegmentfactory.sequence_compile import quantize_resolved_ir
 from awgsegmentfactory.timeline import LogicalChannelState
 
 
@@ -34,32 +35,32 @@ class TestSampleCompile(unittest.TestCase):
         )
         empty = _empty_logical_channel_state()
 
-        seg0 = SegmentIR(
+        seg0 = ResolvedSegment(
             name="s0",
             mode="loop_n",
             loop=1,
             parts=(
-                PartIR(
+                ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": LogicalChannelPartIR(start=st, end=st, interp="hold"),
-                        "V": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "A": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "B": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(start=st, end=st, interp="hold"),
+                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
                     },
                 ),
             ),
             phase_mode="carry",
         )
 
-        seg1_carry = SegmentIR(
+        seg1_carry = ResolvedSegment(
             name="s1",
             mode="loop_n",
             loop=1,
             parts=seg0.parts,
             phase_mode="carry",
         )
-        seg1_fixed = SegmentIR(
+        seg1_fixed = ResolvedSegment(
             name="s1",
             mode="loop_n",
             loop=1,
@@ -67,28 +68,34 @@ class TestSampleCompile(unittest.TestCase):
             phase_mode="fixed",
         )
 
-        ir_carry = ProgramIR(
+        ir_carry = ResolvedIR(
             sample_rate_hz=fs,
             logical_channels=("H", "V", "A", "B"),
             segments=(seg0, seg1_carry),
         )
-        ir_fixed = ProgramIR(
+        ir_fixed = ResolvedIR(
             sample_rate_hz=fs,
             logical_channels=("H", "V", "A", "B"),
             segments=(seg0, seg1_fixed),
         )
 
         full_scale = 20000
-        prog_carry = compile_sequence_program(
+        q_carry = quantize_resolved_ir(
             ir_carry,
             logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        q_fixed = quantize_resolved_ir(
+            ir_fixed,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        prog_carry = compile_sequence_program(
+            q_carry,
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_fixed = compile_sequence_program(
-            ir_fixed,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+            q_fixed,
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
@@ -119,49 +126,54 @@ class TestSampleCompile(unittest.TestCase):
             phases_rad=np.array([0.0]),
         )
 
-        seg0 = SegmentIR(
+        seg0 = ResolvedSegment(
             name="s0",
             mode="loop_n",
             loop=1,
             parts=(
-                PartIR(
+                ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": LogicalChannelPartIR(start=st2, end=st2, interp="hold"),
-                        "V": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "A": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "B": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(start=st2, end=st2, interp="hold"),
+                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
                     },
                 ),
             ),
             phase_mode="carry",
         )
-        seg1 = SegmentIR(
+        seg1 = ResolvedSegment(
             name="s1",
             mode="loop_n",
             loop=1,
             parts=(
-                PartIR(
+                ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": LogicalChannelPartIR(start=st1, end=st1, interp="hold"),
-                        "V": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "A": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
-                        "B": LogicalChannelPartIR(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(start=st1, end=st1, interp="hold"),
+                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
                     },
                 ),
             ),
             phase_mode="carry",
         )
 
-        ir = ProgramIR(
-            sample_rate_hz=fs, logical_channels=("H", "V", "A", "B"), segments=(seg0, seg1)
+        ir = ResolvedIR(
+            sample_rate_hz=fs,
+            logical_channels=("H", "V", "A", "B"),
+            segments=(seg0, seg1),
         )
 
         with self.assertRaises(ValueError):
-            compile_sequence_program(
+            quantized = quantize_resolved_ir(
                 ir,
                 logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+            )
+            compile_sequence_program(
+                quantized,
                 gain=1.0,
                 clip=1.0,
                 full_scale=20000,

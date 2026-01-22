@@ -1,7 +1,7 @@
 """
 End-to-end example:
 
-AWGProgramBuilder -> ProgramIR -> (quantize + synthesize) -> per-segment int16 samples
+AWGProgramBuilder -> ResolvedIR -> QuantizedIR -> per-segment int16 samples
 -> upload to a Spectrum AWG using Sequence Replay Mode.
 
 This file is safe to run without a Spectrum driver installed: it will still
@@ -14,17 +14,18 @@ import time
 
 from awgsegmentfactory import (
     AWGProgramBuilder,
-    ProgramIR,
+    ResolvedIR,
     compile_sequence_program,
     format_samples_time,
+    quantize_resolved_ir,
 )
 
 
 def _build_demo_program(
     *, sample_rate_hz: float
-) -> ProgramIR:
+) -> ResolvedIR:
     b = (
-        AWGProgramBuilder(sample_rate=sample_rate_hz)
+        AWGProgramBuilder()
         .logical_channel("H")
         .logical_channel("V")
         .define("init_H", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
@@ -49,7 +50,7 @@ def _build_demo_program(
     b.segment("wait_again", mode="wait_trig")
     b.hold(time=200e-6)
 
-    return b.build_ir()
+    return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 
 
 def _print_quantization_report(compiled) -> None:
@@ -95,12 +96,14 @@ def main() -> None:
     logical_channel_to_hardware_channel = {"H": 0, "V": 1}
 
     ir = _build_demo_program(sample_rate_hz=sample_rate_hz)
+    q = quantize_resolved_ir(
+        ir, logical_channel_to_hardware_channel=logical_channel_to_hardware_channel
+    )
 
     # If you don't have a card connected, use a safe "typical" int16 full-scale.
     full_scale_default = 32767
     compiled = compile_sequence_program(
-        ir,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
+        q,
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
@@ -144,8 +147,7 @@ def main() -> None:
         # Compile again with the card's exact DAC scaling.
         full_scale = int(card.max_sample_value()) - 1
         compiled = compile_sequence_program(
-            ir,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
+            q,
             gain=1.0,
             clip=0.9,
             full_scale=full_scale,

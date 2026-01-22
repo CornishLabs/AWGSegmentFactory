@@ -21,7 +21,7 @@ class PositionToFreqCalib(ABC):
 
 
 @dataclass(frozen=True)
-class DefinitionSpec:
+class IntentDefinition:
     name: str
     logical_channel: str
     freqs_hz: Tuple[float, ...]
@@ -30,7 +30,7 @@ class DefinitionSpec:
 
 
 @dataclass(frozen=True)
-class SegmentSpec:
+class IntentSegment:
     name: str
     mode: SegmentMode
     loop: int  # for loop_n/once. For wait_trig set loop=1.
@@ -93,11 +93,16 @@ class RemapFromDefOp(Op):
 
 
 @dataclass(frozen=True)
-class ProgramSpec:
-    """Recorded user intent (pre-resolution): definitions + segments of ops."""
+class IntentIR:
+    """
+    Recorded user intent (continuous-time).
 
-    sample_rate_hz: float
+    Notes:
+    - Durations are expressed in seconds (`time_s`) and have not yet been converted
+      into integer sample counts. That discretization happens in `resolve_intent_ir(...)`.
+    """
+
     logical_channels: Tuple[str, ...]
-    definitions: Dict[str, DefinitionSpec]
-    segments: Tuple[SegmentSpec, ...]
+    definitions: Dict[str, IntentDefinition]
+    segments: Tuple[IntentSegment, ...]
     calibrations: Dict[str, object]

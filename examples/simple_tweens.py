@@ -8,7 +8,7 @@ H0, H1 = 90e6, 110e6
 V0 = 100e6
 
 prog = (
-    AWGProgramBuilder(sample_rate=fs)
+    AWGProgramBuilder()
     .logical_channel("H")
     .logical_channel("V")
     # Define initial trap states (paired indexing: trap i = (H[i], V[i]))
@@ -73,5 +73,5 @@ prog = (
     # final segment must be >= 1 sample too (even if you “do nothing”)
     .segment("done", mode="wait_trig")
     .hold(time=max(200e-6, one_sample))
-    .build()
+    .build_timeline(sample_rate_hz=fs)
 )

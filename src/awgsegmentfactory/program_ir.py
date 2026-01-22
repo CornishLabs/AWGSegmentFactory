@@ -8,7 +8,7 @@ from .timeline import LogicalChannelState, ResolvedTimeline, Span
 
 
 @dataclass(frozen=True)
-class LogicalChannelPartIR:
+class ResolvedLogicalChannelPart:
     """Per-logical-channel primitive for a single time interval (part)."""
 
     start: LogicalChannelState
@@ -18,7 +18,7 @@ class LogicalChannelPartIR:
 
 
 @dataclass(frozen=True)
-class PartIR:
+class ResolvedPart:
     """
     A time interval with a fixed interpolation primitive per logical channel.
 
@@ -28,15 +28,15 @@ class PartIR:
     """
 
     n_samples: int
-    logical_channels: Dict[str, LogicalChannelPartIR]
+    logical_channels: Dict[str, ResolvedLogicalChannelPart]
 
 
 @dataclass(frozen=True)
-class SegmentIR:
+class ResolvedSegment:
     name: str
     mode: SegmentMode
     loop: int
-    parts: Tuple[PartIR, ...]
+    parts: Tuple[ResolvedPart, ...]
     phase_mode: SegmentPhaseMode = "carry"
 
     @property
@@ -45,7 +45,7 @@ class SegmentIR:
 
 
 @dataclass(frozen=True)
-class ProgramIR:
+class ResolvedIR:
     """
     Resolved, segment-grouped IR intended for compilation into AWG sequence mode.
 
@@ -56,7 +56,7 @@ class ProgramIR:
 
     sample_rate_hz: float
     logical_channels: Tuple[str, ...]
-    segments: Tuple[SegmentIR, ...]
+    segments: Tuple[ResolvedSegment, ...]
 
     @property
     def n_samples(self) -> int:

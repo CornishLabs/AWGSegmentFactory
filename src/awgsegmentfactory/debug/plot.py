@@ -52,7 +52,7 @@ def interactive_grid_debug(
     if fy is None:
         fy = LinearFreqToPos(slope_hz_per_unit=1e6)  # MHz
 
-    # Allow passing ProgramIR directly for convenience.
+    # Allow passing ResolvedIR directly for convenience.
     if hasattr(tl, "to_timeline"):
         tl = tl.to_timeline()  # type: ignore[assignment]
 

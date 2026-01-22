@@ -5,10 +5,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..program_ir import ProgramIR
+from ..program_ir import ResolvedIR
 from ..sample_compile import CompiledSequenceProgram, compile_sequence_program
 from ..sample_compile import _interp_logical_channel_part as _interp_logical_channel_part
-from ..sequence_compile import quantize_program_ir
+from ..sequence_compile import QuantizedIR, quantize_resolved_ir
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,7 @@ def unroll_compiled_sequence_for_debug(
 
 
 def sequence_samples_debug(
-    program: ProgramIR | CompiledSequenceProgram,
+    program: ResolvedIR | QuantizedIR | CompiledSequenceProgram,
     *,
     logical_channel_to_hardware_channel: Optional[Dict[str, int]] = None,
     wait_trig_loops: int = 3,
@@ -172,28 +172,33 @@ def sequence_samples_debug(
         ) from exc
 
     compiled: CompiledSequenceProgram
-    q_ir: Optional[ProgramIR] = None
+    q_ir: Optional[ResolvedIR] = None
     if isinstance(program, CompiledSequenceProgram):
         compiled = program
+    elif isinstance(program, QuantizedIR):
+        q_ir = program.ir
+        compiled = compile_sequence_program(
+            program, gain=gain, clip=clip, full_scale=full_scale
+        )
     else:
         if logical_channel_to_hardware_channel is None:
             raise ValueError(
-                "logical_channel_to_hardware_channel is required when passing a ProgramIR"
+                "logical_channel_to_hardware_channel is required when passing a ResolvedIR"
             )
-        q_ir, _q_info = quantize_program_ir(
+        quantized = quantize_resolved_ir(
             program,
             logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         )
+        q_ir = quantized.ir
         compiled = compile_sequence_program(
-            program,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
+            quantized,
             gain=gain,
             clip=clip,
             full_scale=full_scale,
         )
     if show_param_traces and q_ir is None:
         raise ValueError(
-            "show_param_traces=True requires passing a ProgramIR (not a CompiledSequenceProgram)"
+            "show_param_traces=True requires passing a ResolvedIR/QuantizedIR (not a CompiledSequenceProgram)"
         )
 
     samples, instances = unroll_compiled_sequence_for_debug(
