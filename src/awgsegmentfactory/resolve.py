@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
 import numpy as np
-import warnings
 
 from .ir import (
     ProgramSpec, SegmentSpec, SegmentMode,
@@ -28,13 +27,6 @@ def _ceil_samples(sample_rate_hz: float, time_s: float) -> int:
     if time_s <= 0:
         return 0
     return int(np.ceil(float(time_s) * float(sample_rate_hz)))
-
-def _snap_freqs_to_wrap(freqs_hz: np.ndarray, seg_len_s: float) -> np.ndarray:
-    # wrap-continuous if f * seg_len_s is an integer number of cycles
-    if seg_len_s <= 0:
-        return freqs_hz
-    k = np.round(freqs_hz * seg_len_s)
-    return k / seg_len_s
 
 def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
     if idxs is None:
@@ -169,19 +161,6 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                     # user wants "cursor doesn't move", but segments must be >= 1 sample overall.
                     # so a hold(0) is a state-noop; allowed.
                     continue
-                dt_s = n / fs
-
-                # In wait_trig segments: snap frequencies to nearest wrap-continuous values
-                if seg.mode == "wait_trig":
-                    for p in spec.planes:
-                        st = cur[p]
-                        snapped = _snap_freqs_to_wrap(st.freqs_hz, dt_s)
-                        df = np.max(np.abs(snapped - st.freqs_hz)) if st.freqs_hz.size else 0.0
-                        if op.warn_df_hz is not None and df > op.warn_df_hz:
-                            warnings.warn(
-                                f"[{seg.name}] snapping on plane {p}: max |df|={df:.3g} Hz exceeds warn_df={op.warn_df_hz:.3g} Hz"
-                            )
-                        cur[p] = PlaneState(snapped, st.amps.copy(), st.phases_rad.copy())
 
                 # Hold applies to all planes (continuous timeline)
                 planes = {p: PlanePartIR(start=cur[p], end=cur[p], interp="hold") for p in spec.planes}
@@ -199,7 +178,7 @@ def resolve_program_ir(spec: ProgramSpec) -> ProgramIR:
                 "Add a hold() or a timed op so the segment is at least 1 sample long."
             )
 
-        segments.append(SegmentIR(name=seg.name, mode=seg.mode, loop=seg.loop, parts=tuple(parts)))
+        segments.append(SegmentIR(name=seg.name, mode=seg.mode, loop=seg.loop, parts=tuple(parts), phase_mode=seg.phase_mode))
 
     return ProgramIR(
         sample_rate_hz=fs,

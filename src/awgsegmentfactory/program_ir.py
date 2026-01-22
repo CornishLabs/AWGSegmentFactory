@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-from .ir import InterpKind, SegmentMode
+from .ir import InterpKind, SegmentMode, SegmentPhaseMode
 from .timeline import PlaneState, ResolvedTimeline, Span
 
 
@@ -37,6 +37,7 @@ class SegmentIR:
     mode: SegmentMode
     loop: int
     parts: Tuple[PartIR, ...]
+    phase_mode: SegmentPhaseMode = "carry"
 
     @property
     def n_samples(self) -> int:
@@ -97,4 +98,3 @@ class ProgramIR:
             segment_starts=segment_starts,
             t_end=n0 / fs,
         )
-

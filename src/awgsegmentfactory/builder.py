@@ -6,6 +6,7 @@ import numpy as np
 
 from .ir import (
     ProgramSpec, SegmentSpec, SegmentMode,
+    SegmentPhaseMode,
     DefinitionSpec,
     HoldOp, UseDefOp, MoveOp, RampAmpToOp, RemapFromDefOp,
 )
@@ -99,8 +100,15 @@ class ToneView:
     def tones(self, plane: str) -> "ToneView":
         return self._b.tones(plane)
 
-    def segment(self, name: str, mode: SegmentMode = "once", loop: Optional[int] = None) -> "AWGProgramBuilder":
-        return self._b.segment(name, mode=mode, loop=loop)
+    def segment(
+        self,
+        name: str,
+        mode: SegmentMode = "once",
+        loop: Optional[int] = None,
+        *,
+        phase_mode: SegmentPhaseMode = "carry",
+    ) -> "AWGProgramBuilder":
+        return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
 
     def hold(self, *, time: float, warn_df: Optional[float] = None) -> "AWGProgramBuilder":
         return self._b.hold(time=time, warn_df=warn_df)
@@ -161,7 +169,14 @@ class AWGProgramBuilder:
         )
         return self
 
-    def segment(self, name: str, mode: SegmentMode = "once", loop: Optional[int] = None) -> "AWGProgramBuilder":
+    def segment(
+        self,
+        name: str,
+        mode: SegmentMode = "once",
+        loop: Optional[int] = None,
+        *,
+        phase_mode: SegmentPhaseMode = "carry",
+    ) -> "AWGProgramBuilder":
         mode = str(mode)  # type: ignore[assignment]
         if mode == "once":
             mode = "loop_n"
@@ -174,7 +189,10 @@ class AWGProgramBuilder:
         else:
             raise ValueError(f"Unknown mode {mode!r}")
 
-        self._segments.append(SegmentSpec(name=name, mode=mode, loop=int(loop), ops=tuple()))
+        if phase_mode not in ("carry", "fixed"):
+            raise ValueError(f"Unknown phase_mode {phase_mode!r}")
+
+        self._segments.append(SegmentSpec(name=name, mode=mode, loop=int(loop), ops=tuple(), phase_mode=phase_mode))
         self._current_seg = len(self._segments) - 1
         return self
 

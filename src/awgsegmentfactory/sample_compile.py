@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+from .program_ir import PartIR, PlanePartIR, ProgramIR, SegmentIR
+from .sequence_compile import SegmentQuantizationInfo, quantize_program_ir
+
+
+@dataclass(frozen=True)
+class CompiledSegment:
+    name: str
+    n_samples: int
+    data_i16: np.ndarray  # (n_channels, n_samples)
+
+
+@dataclass(frozen=True)
+class SequenceStep:
+    step_index: int
+    segment_index: int
+    next_step: int
+    loops: int
+    on_trig: bool
+
+
+@dataclass(frozen=True)
+class CompiledSequenceProgram:
+    sample_rate_hz: float
+    plane_to_channel: Dict[str, int]
+    gain: float
+    clip: float
+    full_scale: int
+    segments: Tuple[CompiledSegment, ...]
+    steps: Tuple[SequenceStep, ...]
+    quantization: Tuple[SegmentQuantizationInfo, ...]
+
+
+def _smoothstep_min_jerk(u: np.ndarray) -> np.ndarray:
+    return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
+
+
+def _interp_plane_part(pp: PlanePartIR, *, n_samples: int, sample_rate_hz: float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns (freqs_hz, amps) as (n_samples, n_tones) arrays.
+    """
+    f0 = pp.start.freqs_hz
+    f1 = pp.end.freqs_hz
+    a0 = pp.start.amps
+    a1 = pp.end.amps
+
+    if f0.shape != f1.shape or a0.shape != a1.shape:
+        raise ValueError("Start/end shape mismatch for plane part")
+
+    n_tones = int(f0.shape[0])
+    if n_samples <= 0:
+        raise ValueError("n_samples must be > 0")
+
+    if n_tones == 0:
+        z = np.zeros((n_samples, 0), dtype=float)
+        return z, z
+
+    if pp.interp == "hold":
+        freqs = np.repeat(f0[None, :], n_samples, axis=0)
+        amps = np.repeat(a0[None, :], n_samples, axis=0)
+        return freqs, amps
+
+    u = (np.arange(n_samples, dtype=float) / float(n_samples))[:, None]  # [0,1)
+    if pp.interp == "min_jerk":
+        u = _smoothstep_min_jerk(u)
+
+    if pp.interp in ("linear", "min_jerk"):
+        freqs = f0[None, :] + (f1 - f0)[None, :] * u
+        amps = a0[None, :] + (a1 - a0)[None, :] * u
+        return freqs, amps
+
+    if pp.interp == "exp":
+        tau = pp.tau_s
+        if tau is None or tau <= 0:
+            freqs = f0[None, :] + (f1 - f0)[None, :] * u
+            amps = a0[None, :] + (a1 - a0)[None, :] * u
+            return freqs, amps
+        t = (np.arange(n_samples, dtype=float) / float(sample_rate_hz))[:, None]
+        k = np.exp(-t / float(tau))
+        freqs = f1[None, :] + (f0 - f1)[None, :] * k
+        amps = a1[None, :] + (a0 - a1)[None, :] * k
+        return freqs, amps
+
+    raise ValueError(f"Unknown interp {pp.interp!r}")
+
+
+def _synth_part(
+    pp: PlanePartIR,
+    *,
+    n_samples: int,
+    sample_rate_hz: float,
+    phase0_rad: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Synthesize one plane part.
+
+    Returns (y, phase_end) where:
+    - y is (n_samples,) float waveform
+    - phase_end is (n_tones,) phase at the end of the part (for carry)
+    """
+    freqs, amps = _interp_plane_part(pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz)
+    if freqs.shape[1] != phase0_rad.shape[0]:
+        raise ValueError("phase0 length mismatch with tone count")
+
+    if freqs.shape[1] == 0:
+        return np.zeros((n_samples,), dtype=float), phase0_rad.copy()
+
+    dt = 1.0 / float(sample_rate_hz)
+    dphi = 2.0 * np.pi * freqs * dt  # (n_samples, n_tones)
+
+    # phi[n] is the phase *at* sample n.
+    phi = phase0_rad[None, :] + np.cumsum(dphi, axis=0) - dphi
+    y = np.sum(amps * np.sin(phi), axis=1)
+
+    phase_end = (phase0_rad + np.sum(dphi, axis=0)) % (2.0 * np.pi)
+    return y, phase_end
+
+
+def _synth_plane_segment(
+    seg: SegmentIR,
+    *,
+    plane: str,
+    sample_rate_hz: float,
+    phase_in: Optional[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    if not seg.parts:
+        return np.zeros((0,), dtype=float), np.zeros((0,), dtype=float)
+
+    first = seg.parts[0].planes[plane]
+    n_tones = int(first.start.freqs_hz.shape[0])
+
+    if seg.phase_mode == "carry":
+        if phase_in is None:
+            phase = first.start.phases_rad.copy()
+        elif phase_in.shape != (n_tones,):
+            raise ValueError(
+                f"Cannot carry phase into segment {seg.name!r} plane {plane!r}: "
+                f"tone count changed from {phase_in.shape[0]} to {n_tones}. "
+                "Use phase_mode='fixed' for this segment or keep tone counts constant."
+            )
+        else:
+            phase = phase_in.copy()
+    else:
+        phase = first.start.phases_rad.copy()
+
+    ys: list[np.ndarray] = []
+    for part in seg.parts:
+        pp = part.planes[plane]
+        y, phase = _synth_part(pp, n_samples=part.n_samples, sample_rate_hz=sample_rate_hz, phase0_rad=phase)
+        ys.append(y)
+    return np.concatenate(ys, axis=0), phase
+
+
+def compile_sequence_program(
+    ir: ProgramIR,
+    *,
+    plane_to_channel: Dict[str, int],
+    gain: float,
+    clip: float,
+    full_scale: int,
+    segment_quantum_s: float = 40e-6,
+    step_samples: int = 32,
+) -> CompiledSequenceProgram:
+    """
+    Compile a ProgramIR into per-segment, per-channel int16 sample arrays suitable
+    for writing into an AWG "sequence mode" pattern memory.
+    """
+    if gain <= 0:
+        raise ValueError("gain must be > 0")
+    if not (0 < clip <= 1.0):
+        raise ValueError("clip must be in (0, 1]")
+    if full_scale <= 0:
+        raise ValueError("full_scale must be > 0")
+    max_i16 = int(np.iinfo(np.int16).max)
+    if full_scale > max_i16:
+        raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
+
+    q_ir, q_info = quantize_program_ir(
+        ir,
+        plane_to_channel=plane_to_channel,
+        segment_quantum_s=segment_quantum_s,
+        step_samples=step_samples,
+    )
+
+    n_segments = len(q_ir.segments)
+    if n_segments == 0:
+        raise ValueError("No segments to compile")
+
+    n_channels = max(plane_to_channel.values()) + 1
+
+    compiled_segments: list[CompiledSegment] = []
+    compiled_steps: list[SequenceStep] = []
+
+    # Phase state carried across segments, per plane.
+    phase_state: Dict[str, np.ndarray] = {}
+
+    for i, seg in enumerate(q_ir.segments):
+        n = seg.n_samples
+        data = np.zeros((n_channels, n), dtype=np.int16)
+
+        for plane in q_ir.planes:
+            if plane not in plane_to_channel:
+                raise KeyError(f"No channel mapping for plane {plane!r}")
+            ch = int(plane_to_channel[plane])
+            y, phase_out = _synth_plane_segment(
+                seg,
+                plane=plane,
+                sample_rate_hz=q_ir.sample_rate_hz,
+                phase_in=phase_state.get(plane),
+            )
+            phase_state[plane] = phase_out
+
+            y = gain * y
+            y = np.clip(y, -1.0, 1.0)
+            samp = np.round(y * (clip * float(full_scale))).astype(np.int16)
+            data[ch, :] = samp
+
+        compiled_segments.append(CompiledSegment(name=seg.name, n_samples=n, data_i16=data))
+
+        on_trig = seg.mode == "wait_trig"
+        loops = int(seg.loop) if seg.mode == "loop_n" else 1
+        compiled_steps.append(
+            SequenceStep(
+                step_index=i,
+                segment_index=i,
+                next_step=(i + 1) % n_segments,
+                loops=loops,
+                on_trig=on_trig,
+            )
+        )
+
+    return CompiledSequenceProgram(
+        sample_rate_hz=q_ir.sample_rate_hz,
+        plane_to_channel=dict(plane_to_channel),
+        gain=float(gain),
+        clip=float(clip),
+        full_scale=int(full_scale),
+        segments=tuple(compiled_segments),
+        steps=tuple(compiled_steps),
+        quantization=tuple(q_info),
+    )

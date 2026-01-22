@@ -1,10 +1,10 @@
 import unittest
-import warnings
 
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.ir import HoldOp, RemapFromDefOp, UseDefOp
+from awgsegmentfactory.sequence_compile import quantize_program_ir
 
 
 class TestBuilder(unittest.TestCase):
@@ -59,15 +59,17 @@ class TestBuilder(unittest.TestCase):
         self.assertIsInstance(ops1[0], RemapFromDefOp)
         self.assertEqual(ops1[0].dst, (0, 1, 2))
 
-    def test_wait_trig_hold_snaps_and_warns(self) -> None:
-        fs = 10.0  # dt=0.1s
+    def test_wait_trig_hold_snaps_in_quantize_stage(self) -> None:
+        fs = 1000.0
         f0 = 7.0
-        hold_s = 0.25  # -> ceil(2.5)=3 samples -> dt_s=0.3s
-        expected = round(f0 * 0.3) / 0.3
+        hold_s = 0.11  # 110 samples
 
         b = (
             AWGProgramBuilder(sample_rate=fs)
             .plane("H")
+            .plane("V")
+            .plane("A")
+            .plane("B")
             .define("dH", plane="H", freqs=[f0], amps=[1.0], phases="auto")
             .segment("wait", mode="wait_trig")
             .tones("H")
@@ -75,14 +77,22 @@ class TestBuilder(unittest.TestCase):
             .hold(time=hold_s, warn_df=0.1)
         )
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            ir = b.build_ir()
+        ir = b.build_ir()
+        self.assertEqual(ir.segments[0].n_samples, 110)
+        self.assertAlmostEqual(float(ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]), f0, places=12)
 
-        self.assertGreaterEqual(len(w), 1)
-        self.assertTrue(any("snapping" in str(x.message) for x in w))
-        snapped = ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
-        self.assertAlmostEqual(float(snapped), expected, places=6)
+        q_ir, q_info = quantize_program_ir(
+            ir,
+            plane_to_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        self.assertEqual(q_ir.segments[0].n_samples, 96)
+        self.assertEqual(q_info[0].original_samples, 110)
+        self.assertEqual(q_info[0].quantized_samples, 96)
+
+        seg_len_s = 96 / fs
+        expected = round(f0 * seg_len_s) / seg_len_s
+        snapped = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
+        self.assertAlmostEqual(float(snapped), expected, places=12)
 
     def test_loop_n_hold_does_not_snap(self) -> None:
         fs = 10.0
@@ -96,12 +106,7 @@ class TestBuilder(unittest.TestCase):
             .use_def("dH")
             .hold(time=0.25, warn_df=0.1)
         )
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            ir = b.build_ir()
-
-        self.assertEqual(len(w), 0)
+        ir = b.build_ir()
         f = ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), f0, places=12)
 
