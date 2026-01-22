@@ -30,7 +30,9 @@ class SegmentQuantizationInfo:
         return self.quantized_samples / self.sample_rate_hz
 
 
-def format_samples_time(n_samples: int, sample_rate_hz: float, *, unit: str = "us") -> str:
+def format_samples_time(
+    n_samples: int, sample_rate_hz: float, *, unit: str = "us"
+) -> str:
     if unit == "us":
         scale = 1e6
         suffix = "µs"
@@ -62,7 +64,9 @@ def _round_to_multiple(n: int, m: int) -> int:
     return int(round(n / m)) * m
 
 
-def quantum_samples(sample_rate_hz: float, *, quantum_s: float, step_samples: int) -> int:
+def quantum_samples(
+    sample_rate_hz: float, *, quantum_s: float, step_samples: int
+) -> int:
     """
     Choose a global segment quantum (e.g. ~40us) in machine units (samples),
     rounded to the nearest hardware step size.
@@ -118,7 +122,9 @@ def _segment_is_constant(seg: SegmentIR, plane: str) -> bool:
     return True
 
 
-def _snap_freqs_to_wrap(freqs_hz: np.ndarray, *, n_samples: int, sample_rate_hz: float) -> np.ndarray:
+def _snap_freqs_to_wrap(
+    freqs_hz: np.ndarray, *, n_samples: int, sample_rate_hz: float
+) -> np.ndarray:
     if n_samples <= 0:
         return freqs_hz
     seg_len_s = float(n_samples) / float(sample_rate_hz)
@@ -142,7 +148,9 @@ def quantize_program_ir(
       (but at least one quantum), and constant segments get frequency wrap-snapping.
     """
     fs = float(ir.sample_rate_hz)
-    q_samples = quantum_samples(fs, quantum_s=segment_quantum_s, step_samples=step_samples)
+    q_samples = quantum_samples(
+        fs, quantum_s=segment_quantum_s, step_samples=step_samples
+    )
 
     n_channels = len(set(plane_to_channel.values()))
     min_samples = min_segment_samples_per_channel(n_channels=n_channels)
@@ -195,7 +203,9 @@ def quantize_program_ir(
         if extra > 0:
             # Pad segment to `n1` by appending a hold part at the end.
             if not parts:
-                raise RuntimeError("resolve_program_ir produced a segment with no parts")
+                raise RuntimeError(
+                    "resolve_program_ir produced a segment with no parts"
+                )
             hold_planes = {
                 p: PlanePartIR(
                     start=parts[-1].planes[p].end,
@@ -235,10 +245,16 @@ def quantize_program_ir(
                 new_plane_parts: Dict[str, PlanePartIR] = {}
                 for p in ir.planes:
                     pp = part.planes[p]
-                    snapped = _snap_freqs_to_wrap(pp.start.freqs_hz, n_samples=seg_len, sample_rate_hz=fs)
-                    st = PlaneState(snapped, pp.start.amps.copy(), pp.start.phases_rad.copy())
+                    snapped = _snap_freqs_to_wrap(
+                        pp.start.freqs_hz, n_samples=seg_len, sample_rate_hz=fs
+                    )
+                    st = PlaneState(
+                        snapped, pp.start.amps.copy(), pp.start.phases_rad.copy()
+                    )
                     new_plane_parts[p] = PlanePartIR(start=st, end=st, interp="hold")
-                new_parts.append(PartIR(n_samples=part.n_samples, planes=new_plane_parts))
+                new_parts.append(
+                    PartIR(n_samples=part.n_samples, planes=new_plane_parts)
+                )
             parts = new_parts
 
         out_segments.append(
@@ -251,4 +267,6 @@ def quantize_program_ir(
             )
         )
 
-    return ProgramIR(sample_rate_hz=fs, planes=ir.planes, segments=tuple(out_segments)), infos
+    return ProgramIR(
+        sample_rate_hz=fs, planes=ir.planes, segments=tuple(out_segments)
+    ), infos

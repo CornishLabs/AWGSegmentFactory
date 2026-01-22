@@ -11,6 +11,7 @@ class LinearPositionToFreqCalib(PositionToFreqCalib):
 
     Later you might make slope per-tone, axis-dependent, or use a matrix from measurements.
     """
+
     slope_hz_per_um: float
 
     def df_hz(self, tone_id: ToneId, dx_um: float, axis: str) -> float:

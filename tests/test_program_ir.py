@@ -93,4 +93,3 @@ class TestProgramIR(unittest.TestCase):
         sV_while_H_ramps = tl.state_at("V", 3.5)
         np.testing.assert_allclose(sV_while_H_ramps.freqs_hz, [202.0])
         np.testing.assert_allclose(sV_while_H_ramps.amps, [1.0])
-

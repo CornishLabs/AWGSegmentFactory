@@ -97,4 +97,3 @@ class TestStateContinuity(unittest.TestCase):
             for prev, cur in zip(spans, spans[1:]):
                 self.assertEqual(prev.t1, cur.t0)
             self.assertEqual(spans[-1].t1, tl.t_end)
-

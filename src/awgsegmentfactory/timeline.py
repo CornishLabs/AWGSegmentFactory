@@ -5,11 +5,13 @@ import numpy as np
 
 InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
 
+
 @dataclass(frozen=True)
 class PlaneState:
     freqs_hz: np.ndarray  # (N,)
-    amps: np.ndarray      # (N,)
+    amps: np.ndarray  # (N,)
     phases_rad: np.ndarray  # (N,)
+
 
 @dataclass(frozen=True)
 class Span:
@@ -26,7 +28,7 @@ class Span:
 
     def _smoothstep_minjerk(self, u: float) -> float:
         # classic 5th order minimum-jerk polynomial
-        return u*u*u*(10.0 + u*(-15.0 + 6.0*u))
+        return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
     def state_at(self, t: float) -> PlaneState:
         if t <= self.t0:
@@ -48,13 +50,13 @@ class Span:
         if self.interp == "min_jerk":
             uu = self._smoothstep_minjerk(float(u))
             freqs = f0 + (f1 - f0) * uu
-            amps  = a0 + (a1 - a0) * uu
+            amps = a0 + (a1 - a0) * uu
             phases = p0 + (p1 - p0) * uu
             return PlaneState(freqs, amps, phases)
 
         if self.interp == "linear":
             freqs = f0 + (f1 - f0) * u
-            amps  = a0 + (a1 - a0) * u
+            amps = a0 + (a1 - a0) * u
             phases = p0 + (p1 - p0) * u
             return PlaneState(freqs, amps, phases)
 
@@ -62,17 +64,18 @@ class Span:
             # interpret as exponential approach for AMPLITUDES primarily; freqs/phases usually constant
             if self.tau_s is None or self.tau_s <= 0:
                 freqs = f0 + (f1 - f0) * u
-                amps  = a0 + (a1 - a0) * u
+                amps = a0 + (a1 - a0) * u
                 phases = p0 + (p1 - p0) * u
                 return PlaneState(freqs, amps, phases)
-            x = (t - self.t0)
+            x = t - self.t0
             k = np.exp(-x / self.tau_s)
             freqs = f1 + (f0 - f1) * k
-            amps  = a1 + (a0 - a1) * k
+            amps = a1 + (a0 - a1) * k
             phases = p1 + (p0 - p1) * k
             return PlaneState(freqs, amps, phases)
 
         raise ValueError(f"Unknown interp {self.interp!r}")
+
 
 @dataclass
 class ResolvedTimeline:

@@ -62,8 +62,12 @@ class TestSampleCompile(unittest.TestCase):
             phase_mode="fixed",
         )
 
-        ir_carry = ProgramIR(sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1_carry))
-        ir_fixed = ProgramIR(sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1_fixed))
+        ir_carry = ProgramIR(
+            sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1_carry)
+        )
+        ir_fixed = ProgramIR(
+            sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1_fixed)
+        )
 
         full_scale = 20000
         prog_carry = compile_sequence_program(
@@ -141,7 +145,9 @@ class TestSampleCompile(unittest.TestCase):
             phase_mode="carry",
         )
 
-        ir = ProgramIR(sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1))
+        ir = ProgramIR(
+            sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg0, seg1)
+        )
 
         with self.assertRaises(ValueError):
             compile_sequence_program(
@@ -151,4 +157,3 @@ class TestSampleCompile(unittest.TestCase):
                 clip=1.0,
                 full_scale=20000,
             )
-

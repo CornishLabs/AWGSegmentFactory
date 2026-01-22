@@ -27,7 +27,9 @@ class TestSequenceCompile(unittest.TestCase):
 
     def test_quantize_non_loopable_segment_ceils_to_step(self) -> None:
         fs = 1000.0
-        st = PlaneState(freqs_hz=np.array([10.0]), amps=np.array([1.0]), phases_rad=np.array([0.0]))
+        st = PlaneState(
+            freqs_hz=np.array([10.0]), amps=np.array([1.0]), phases_rad=np.array([0.0])
+        )
         seg = SegmentIR(
             name="seg",
             mode="loop_n",
@@ -37,7 +39,11 @@ class TestSequenceCompile(unittest.TestCase):
                     n_samples=193,
                     planes={
                         "H": PlanePartIR(start=st, end=st, interp="hold"),
-                        "V": PlanePartIR(start=_empty_plane_state(), end=_empty_plane_state(), interp="hold"),
+                        "V": PlanePartIR(
+                            start=_empty_plane_state(),
+                            end=_empty_plane_state(),
+                            interp="hold",
+                        ),
                     },
                 ),
             ),
@@ -53,10 +59,14 @@ class TestSequenceCompile(unittest.TestCase):
         f = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), 10.0, places=12)
 
-    def test_quantize_loopable_constant_segment_can_round_down_and_snaps_freqs(self) -> None:
+    def test_quantize_loopable_constant_segment_can_round_down_and_snaps_freqs(
+        self,
+    ) -> None:
         fs = 1000.0
         f0 = 7.0
-        st = PlaneState(freqs_hz=np.array([f0]), amps=np.array([1.0]), phases_rad=np.array([0.0]))
+        st = PlaneState(
+            freqs_hz=np.array([f0]), amps=np.array([1.0]), phases_rad=np.array([0.0])
+        )
         empty = _empty_plane_state()
 
         seg = SegmentIR(
@@ -77,7 +87,9 @@ class TestSequenceCompile(unittest.TestCase):
         )
         ir = ProgramIR(sample_rate_hz=fs, planes=("H", "V", "A", "B"), segments=(seg,))
 
-        q_ir, info = quantize_program_ir(ir, plane_to_channel={"H": 0, "V": 1, "A": 2, "B": 3})
+        q_ir, info = quantize_program_ir(
+            ir, plane_to_channel={"H": 0, "V": 1, "A": 2, "B": 3}
+        )
 
         # 110 rounded to nearest multiple of 32 -> 96, and 4 active channels -> min segment is 96.
         self.assertEqual(info[0].original_samples, 110)
@@ -88,4 +100,3 @@ class TestSequenceCompile(unittest.TestCase):
         expected = round(f0 * seg_len_s) / seg_len_s
         f = q_ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(f), expected, places=12)
-

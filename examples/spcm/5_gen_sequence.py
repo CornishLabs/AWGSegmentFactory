@@ -23,6 +23,7 @@ import msvcrt
 
 USING_EXTERNAL_TRIGGER = False
 
+
 def kb_hit():
     """
     get the key that was pressed
@@ -35,7 +36,7 @@ def kb_hit():
     return ord(msvcrt.getch()) if msvcrt.kbhit() else 0
 
 
-def setup_sequence(sequence : spcm.Sequence):
+def setup_sequence(sequence: spcm.Sequence):
     print("Calculation of output data")
 
     # helper values
@@ -46,32 +47,68 @@ def setup_sequence(sequence : spcm.Sequence):
     # we generate the same data on all active channels !
 
     # sync puls: first half zero, second half -FS
-    num_samples_in_segment = 480 #factor * 80
+    num_samples_in_segment = 480  # factor * 80
     segment_sync = sequence.add_segment(num_samples_in_segment)
-    segment_sync[:, :num_samples_in_segment // 2] = 0
-    segment_sync[:, num_samples_in_segment // 2:] = -full_scale
+    segment_sync[:, : num_samples_in_segment // 2] = 0
+    segment_sync[:, num_samples_in_segment // 2 :] = -full_scale
 
     # sine
-    num_samples_in_segment = 768 # factor * 128
+    num_samples_in_segment = 768  # factor * 128
     segment_sin1 = sequence.add_segment(num_samples_in_segment)
-    segment_sin1[:, :] = half_scale + np.int32(half_scale * np.sin(2.0 * np.pi * (np.arange(num_samples_in_segment)) / num_samples_in_segment) + 0.5)
+    segment_sin1[:, :] = half_scale + np.int32(
+        half_scale
+        * np.sin(
+            2.0 * np.pi * (np.arange(num_samples_in_segment)) / num_samples_in_segment
+        )
+        + 0.5
+    )
 
     # cosine
     segment_sin2 = sequence.add_segment(num_samples_in_segment)
-    segment_sin2[:, :] = half_scale + np.int32(half_scale * np.sin(2 * 2.0 * np.pi * (np.arange(num_samples_in_segment)) / num_samples_in_segment) + 0.5)
+    segment_sin2[:, :] = half_scale + np.int32(
+        half_scale
+        * np.sin(
+            2
+            * 2.0
+            * np.pi
+            * (np.arange(num_samples_in_segment))
+            / num_samples_in_segment
+        )
+        + 0.5
+    )
 
     # inverted sine
     segment_sin3 = sequence.add_segment(num_samples_in_segment)
-    segment_sin3[:, :] = half_scale + np.int32(half_scale * np.sin(3 * 2.0 * np.pi * (np.arange(num_samples_in_segment)) / num_samples_in_segment) + 0.5)
+    segment_sin3[:, :] = half_scale + np.int32(
+        half_scale
+        * np.sin(
+            3
+            * 2.0
+            * np.pi
+            * (np.arange(num_samples_in_segment))
+            / num_samples_in_segment
+        )
+        + 0.5
+    )
 
     # inverted cosine
     segment_sin4 = sequence.add_segment(num_samples_in_segment)
-    segment_sin4[:, :] = half_scale + np.int32(half_scale * np.sin(4 * 2.0 * np.pi * (np.arange(num_samples_in_segment)) / num_samples_in_segment) + 0.5)
+    segment_sin4[:, :] = half_scale + np.int32(
+        half_scale
+        * np.sin(
+            4
+            * 2.0
+            * np.pi
+            * (np.arange(num_samples_in_segment))
+            / num_samples_in_segment
+        )
+        + 0.5
+    )
 
     # DC level
     segment_dc_level = sequence.add_segment(num_samples_in_segment)
     segment_dc_level[:, :] = full_scale // 2
-    
+
     ### Programming the steps
     # The sequence is divided into four parts:
     #  part 0: sync, sin 1
@@ -81,29 +118,29 @@ def setup_sequence(sequence : spcm.Sequence):
     #  part 4: dc-level (final step)
 
     # sine
-    part0_sync   = sequence.add_step(segment_sync, loops=1)
-    part0_sin1   = sequence.add_step(segment_sin1, loops=2)
+    part0_sync = sequence.add_step(segment_sync, loops=1)
+    part0_sin1 = sequence.add_step(segment_sin1, loops=2)
 
     # cosine
-    part1_sync   = sequence.add_step(segment_sync, loops=1)
-    part1_sin2   = sequence.add_step(segment_sin2, loops=2)
+    part1_sync = sequence.add_step(segment_sync, loops=1)
+    part1_sin2 = sequence.add_step(segment_sin2, loops=2)
 
     # inverted sine
-    part2_sync     = sequence.add_step(segment_sync, loops=1)
-    part2_sin3     = sequence.add_step(segment_sin3, loops=2)
+    part2_sync = sequence.add_step(segment_sync, loops=1)
+    part2_sin3 = sequence.add_step(segment_sin3, loops=2)
 
     # inverted cosine
-    part3_sync     = sequence.add_step(segment_sync, loops=1)
-    part3_sin4     = sequence.add_step(segment_sin4, loops=2)
+    part3_sync = sequence.add_step(segment_sync, loops=1)
+    part3_sin4 = sequence.add_step(segment_sin4, loops=2)
 
     # final step: DC level
-    final_dc       = sequence.add_step(segment_dc_level, loops=1)
+    final_dc = sequence.add_step(segment_dc_level, loops=1)
 
     ### Programming the transitions between the different steps
 
     # Configure which step is executed first
     sequence.entry_step(part0_sync)
-    
+
     # Transitions in the first part of the sequence
     # NOTE: if no external trigger is used, the transition is set to the same step and with a key press
     # the step is changed and a transitions to the next set is set
@@ -112,21 +149,21 @@ def setup_sequence(sequence : spcm.Sequence):
         part0_sin1.set_transition(part1_sync, on_trig=True)
     else:
         part0_sin1.set_transition(part0_sin1)
-    
+
     # The second part of the sequence
     part1_sync.set_transition(part1_sin2)
     if USING_EXTERNAL_TRIGGER:
         part1_sin2.set_transition(part2_sync, on_trig=True)
     else:
         part1_sin2.set_transition(part1_sin2)
-    
+
     # The third part of the sequence
     part2_sync.set_transition(part2_sin3)
     if USING_EXTERNAL_TRIGGER:
         part2_sin3.set_transition(part3_sync, on_trig=True)
     else:
         part2_sin3.set_transition(part2_sin3)
-    
+
     # The fourth part of the sequence
     part3_sync.set_transition(part3_sin4)
     if USING_EXTERNAL_TRIGGER:
@@ -136,26 +173,27 @@ def setup_sequence(sequence : spcm.Sequence):
 
     # This is the final step of the sequence
     final_dc.final_step()
-    
+
     # write the segments to the card
     sequence.write_setup()
 
     print("... sequence setup done")
 
 
-card : spcm.Card
+card: spcm.Card
 # with spcm.Card('/dev/spcm0') as card:                         # if you want to open a specific card
 # with spcm.Card('TCPIP::192.168.1.10::inst0::INSTR') as card:  # if you want to open a remote card
 # with spcm.Card(serial_number=12345) as card:                  # if you want to open a card by its serial number
-with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:          # if you want to open the first card of a specific type
-    
+with spcm.Card(
+    card_type=spcm.SPCM_TYPE_AO, verbose=False
+) as card:  # if you want to open the first card of a specific type
     # setup card mode
     card.card_mode(spcm.SPC_REP_STD_SEQUENCE)
-    
+
     # set up the channels
     channels = spcm.Channels(card, card_enable=spcm.CHANNEL0)
     channels.enable(True)
-    channels.output_load(units.highZ) # high impedance
+    channels.output_load(units.highZ)  # high impedance
     channels.amp(1 * units.V)
     channels.stop_level(spcm.SPCM_STOPLVL_HOLDLAST)
 
@@ -171,7 +209,9 @@ with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:          # i
         trigger.ext0_coupling(spcm.COUPLING_DC)
         trigger.termination(1)  # 50 Ohm termination
     else:
-        trigger.or_mask(spcm.SPC_TMASK_NONE)  # none trigger (using force trigger from software)
+        trigger.or_mask(
+            spcm.SPC_TMASK_NONE
+        )  # none trigger (using force trigger from software)
 
     # Setup the clock
     clock = spcm.Clock(card)
@@ -186,7 +226,7 @@ with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:          # i
     print(sequence)
 
     # We'll start and wait until all sequences are replayed.
-    card.timeout(0) # no timeout
+    card.timeout(0)  # no timeout
     print("Starting the card")
     card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
 
@@ -210,11 +250,11 @@ with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:          # i
             card.stop()
             break
 
-        elif key == ord('c') or key == ord('C'):
+        elif key == ord("c") or key == ord("C"):
             if not USING_EXTERNAL_TRIGGER:
                 print("sequence {0:d}".format(part_actual))
                 part_last_step = sequence.steps[part_transitions[part_actual]]
-                new_step =       sequence.steps[part_transitions[part_actual] + 1]
+                new_step = sequence.steps[part_transitions[part_actual] + 1]
                 part_last_step.update(to_step=new_step)
                 part_actual += 1
 
@@ -227,5 +267,3 @@ with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:          # i
             if part_actual >= len(part_transitions):
                 break
     print("... Finished the sequence and stopping the card")
-
-

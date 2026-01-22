@@ -5,28 +5,38 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .ir import (
-    ProgramSpec, SegmentSpec, SegmentMode,
+    ProgramSpec,
+    SegmentSpec,
+    SegmentMode,
     SegmentPhaseMode,
     DefinitionSpec,
-    HoldOp, UseDefOp, MoveOp, RampAmpToOp, RemapFromDefOp,
+    HoldOp,
+    UseDefOp,
+    MoveOp,
+    RampAmpToOp,
+    RemapFromDefOp,
 )
 from .program_ir import ProgramIR
 from .resolve import resolve_program, resolve_program_ir
+
 
 def _as_tuple_f(x: float | Sequence[float]) -> Tuple[float, ...]:
     if isinstance(x, (int, float)):
         return (float(x),)
     return tuple(float(v) for v in x)
 
+
 def _phases_auto(n: int) -> Tuple[float, ...]:
     # placeholder: you can later implement phase picking for cresting, etc.
     return tuple(0.0 for _ in range(n))
+
 
 class ToneView:
     """
     View over a particular plane (e.g. "H" or "V") within the current segment.
     Implements plane ops and forwards builder methods so fluent chaining works.
     """
+
     def __init__(self, b: "AWGProgramBuilder", plane: str):
         self._b = b
         self._plane = plane
@@ -36,9 +46,24 @@ class ToneView:
         self._b._append(UseDefOp(plane=self._plane, def_name=def_name))
         return self
 
-    def move(self, *, df: float, time: float, idxs: Optional[Sequence[int]] = None, kind: str = "linear") -> "ToneView":
+    def move(
+        self,
+        *,
+        df: float,
+        time: float,
+        idxs: Optional[Sequence[int]] = None,
+        kind: str = "linear",
+    ) -> "ToneView":
         idx_t = tuple(int(i) for i in idxs) if idxs is not None else None
-        self._b._append(MoveOp(plane=self._plane, df_hz=float(df), time_s=float(time), idxs=idx_t, kind=kind))  # type: ignore[arg-type]
+        self._b._append(
+            MoveOp(
+                plane=self._plane,
+                df_hz=float(df),
+                time_s=float(time),
+                idxs=idx_t,
+                kind=kind,
+            )
+        )  # type: ignore[arg-type]
         return self
 
     def ramp_amp_to(
@@ -51,7 +76,9 @@ class ToneView:
         idxs: Optional[Sequence[int]] = None,
     ) -> "ToneView":
         idx_t = tuple(int(i) for i in idxs) if idxs is not None else None
-        amps_t = amps if isinstance(amps, (int, float)) else tuple(float(a) for a in amps)
+        amps_t = (
+            amps if isinstance(amps, (int, float)) else tuple(float(a) for a in amps)
+        )
         self._b._append(
             RampAmpToOp(
                 plane=self._plane,
@@ -110,7 +137,9 @@ class ToneView:
     ) -> "AWGProgramBuilder":
         return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
 
-    def hold(self, *, time: float, warn_df: Optional[float] = None) -> "AWGProgramBuilder":
+    def hold(
+        self, *, time: float, warn_df: Optional[float] = None
+    ) -> "AWGProgramBuilder":
         return self._b.hold(time=time, warn_df=warn_df)
 
     def build(self):
@@ -148,7 +177,9 @@ class AWGProgramBuilder:
         phases: str | Sequence[float] = "auto",
     ) -> "AWGProgramBuilder":
         if plane not in self._planes:
-            raise ValueError(f"Define references unknown plane {plane!r}. Call .plane({plane!r}) first.")
+            raise ValueError(
+                f"Define references unknown plane {plane!r}. Call .plane({plane!r}) first."
+            )
         if len(freqs) != len(amps):
             raise ValueError("define: freqs and amps must have same length")
         n = len(freqs)
@@ -192,7 +223,11 @@ class AWGProgramBuilder:
         if phase_mode not in ("carry", "fixed"):
             raise ValueError(f"Unknown phase_mode {phase_mode!r}")
 
-        self._segments.append(SegmentSpec(name=name, mode=mode, loop=int(loop), ops=tuple(), phase_mode=phase_mode))
+        self._segments.append(
+            SegmentSpec(
+                name=name, mode=mode, loop=int(loop), ops=tuple(), phase_mode=phase_mode
+            )
+        )
         self._current_seg = len(self._segments) - 1
         return self
 
@@ -203,10 +238,17 @@ class AWGProgramBuilder:
             raise RuntimeError("Call .segment(...) before .tones(...)")
         return ToneView(self, plane)
 
-    def hold(self, *, time: float, warn_df: Optional[float] = None) -> "AWGProgramBuilder":
+    def hold(
+        self, *, time: float, warn_df: Optional[float] = None
+    ) -> "AWGProgramBuilder":
         if self._current_seg is None:
             raise RuntimeError("Call .segment(...) before .hold(...)")
-        self._append(HoldOp(time_s=float(time), warn_df_hz=float(warn_df) if warn_df is not None else None))
+        self._append(
+            HoldOp(
+                time_s=float(time),
+                warn_df_hz=float(warn_df) if warn_df is not None else None,
+            )
+        )
         return self
 
     def _append(self, op) -> None:

@@ -14,10 +14,16 @@ import time
 
 import numpy as np
 
-from awgsegmentfactory import AWGProgramBuilder, compile_sequence_program, format_samples_time
+from awgsegmentfactory import (
+    AWGProgramBuilder,
+    compile_sequence_program,
+    format_samples_time,
+)
 
 
-def _build_demo_program(*, sample_rate_hz: float) -> "awgsegmentfactory.program_ir.ProgramIR":
+def _build_demo_program(
+    *, sample_rate_hz: float
+) -> "awgsegmentfactory.program_ir.ProgramIR":
     b = (
         AWGProgramBuilder(sample_rate=sample_rate_hz)
         .plane("H")
@@ -57,7 +63,9 @@ def _print_quantization_report(compiled) -> None:
     for qi in compiled.quantization:
         o = format_samples_time(qi.original_samples, fs)
         n = format_samples_time(qi.quantized_samples, fs)
-        print(f"- {qi.name}: {o} -> {n} | mode={qi.mode} loop={qi.loop} loopable={qi.loopable}")
+        print(
+            f"- {qi.name}: {o} -> {n} | mode={qi.mode} loop={qi.loop} loopable={qi.loopable}"
+        )
 
 
 def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
@@ -69,12 +77,16 @@ def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
 
     steps_hw = []
     for step in compiled.steps:
-        steps_hw.append(sequence.add_step(segments_hw[step.segment_index], loops=step.loops))
+        steps_hw.append(
+            sequence.add_step(segments_hw[step.segment_index], loops=step.loops)
+        )
 
     sequence.entry_step(steps_hw[0])
 
     for step in compiled.steps:
-        steps_hw[step.step_index].set_transition(steps_hw[step.next_step], on_trig=step.on_trig)
+        steps_hw[step.step_index].set_transition(
+            steps_hw[step.next_step], on_trig=step.on_trig
+        )
 
     sequence.write_setup()
 
@@ -157,4 +169,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

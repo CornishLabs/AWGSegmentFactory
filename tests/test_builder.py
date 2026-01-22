@@ -38,15 +38,29 @@ class TestBuilder(unittest.TestCase):
 
     def test_build_spec_records_ops_and_expands_remap_dst_all(self) -> None:
         b = AWGProgramBuilder(sample_rate=10.0).plane("H")
-        b.define("start", plane="H", freqs=[1.0, 2.0, 3.0], amps=[1.0, 1.0, 1.0], phases="auto")
-        b.define("target", plane="H", freqs=[4.0, 5.0, 6.0], amps=[1.0, 1.0, 1.0], phases="auto")
+        b.define(
+            "start",
+            plane="H",
+            freqs=[1.0, 2.0, 3.0],
+            amps=[1.0, 1.0, 1.0],
+            phases="auto",
+        )
+        b.define(
+            "target",
+            plane="H",
+            freqs=[4.0, 5.0, 6.0],
+            amps=[1.0, 1.0, 1.0],
+            phases="auto",
+        )
 
         b.segment("init", mode="once")
         b.tones("H").use_def("start")
         b.hold(time=0.1)
 
         b.segment("remap", mode="once")
-        b.tones("H").remap_from_def(target_def="target", src=[0, 1, 2], dst="all", time=0.1)
+        b.tones("H").remap_from_def(
+            target_def="target", src=[0, 1, 2], dst="all", time=0.1
+        )
 
         spec = b.build_spec()
         self.assertEqual([s.name for s in spec.segments], ["init", "remap"])
@@ -79,7 +93,9 @@ class TestBuilder(unittest.TestCase):
 
         ir = b.build_ir()
         self.assertEqual(ir.segments[0].n_samples, 110)
-        self.assertAlmostEqual(float(ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]), f0, places=12)
+        self.assertAlmostEqual(
+            float(ir.segments[0].parts[0].planes["H"].start.freqs_hz[0]), f0, places=12
+        )
 
         q_ir, q_info = quantize_program_ir(
             ir,

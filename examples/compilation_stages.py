@@ -34,9 +34,13 @@ def _describe_spec(spec) -> None:
 
 def _describe_ir(ir) -> None:
     print("\n== ProgramIR (primitives) ==")
-    print(f"segments: {len(ir.segments)} | total_samples: {ir.n_samples} | duration_s: {ir.duration_s:.6f}")
+    print(
+        f"segments: {len(ir.segments)} | total_samples: {ir.n_samples} | duration_s: {ir.duration_s:.6f}"
+    )
     for seg in ir.segments:
-        print(f"- segment {seg.name!r}: mode={seg.mode} loop={seg.loop} samples={seg.n_samples}")
+        print(
+            f"- segment {seg.name!r}: mode={seg.mode} loop={seg.loop} samples={seg.n_samples}"
+        )
         for i, part in enumerate(seg.parts):
             kinds = {p: part.planes[p].interp for p in ir.planes}
             print(f"  part {i}: n_samples={part.n_samples} kinds={kinds}")
@@ -145,7 +149,9 @@ def main() -> None:
     b.tones("H").move(df=+1.0, time=0.3)  # 0.3s -> 3 samples
 
     b.segment("ramp_V", mode="loop_n", loop=2)
-    b.tones("V").ramp_amp_to(amps=0.0, time=0.2, kind="exp", tau=0.1)  # 0.2s -> 2 samples
+    b.tones("V").ramp_amp_to(
+        amps=0.0, time=0.2, kind="exp", tau=0.1
+    )  # 0.2s -> 2 samples
 
     # ---- 2) ProgramSpec (intent IR) ----
     spec = b.build_spec()
@@ -170,10 +176,16 @@ def main() -> None:
     seg0 = ir.segments[0]
     part0 = seg0.parts[0]
     ppH = part0.planes["H"]
-    freqs, amps, phases = _plane_part_to_arrays(ppH, n_samples=part0.n_samples, sample_rate_hz=ir.sample_rate_hz)
-    y = _tonebank_to_samples(freqs, amps, ppH.start.phases_rad, sample_rate_hz=ir.sample_rate_hz)
+    freqs, amps, phases = _plane_part_to_arrays(
+        ppH, n_samples=part0.n_samples, sample_rate_hz=ir.sample_rate_hz
+    )
+    y = _tonebank_to_samples(
+        freqs, amps, ppH.start.phases_rad, sample_rate_hz=ir.sample_rate_hz
+    )
     print("\n== Vectorised synthesis demo ==")
-    print(f"segment {seg0.name!r} plane 'H': freqs shape={freqs.shape} amps shape={amps.shape} y shape={y.shape}")
+    print(
+        f"segment {seg0.name!r} plane 'H': freqs shape={freqs.shape} amps shape={amps.shape} y shape={y.shape}"
+    )
     print("first few y samples:", np.array2string(y[: min(len(y), 8)], precision=4))
 
 

@@ -7,6 +7,7 @@ import numpy as np
 
 from ..timeline import ResolvedTimeline
 
+
 @dataclass(frozen=True)
 class LinearFreqToPos:
     f0_hz: float = 0.0
@@ -15,10 +16,12 @@ class LinearFreqToPos:
     def __call__(self, f_hz: np.ndarray) -> np.ndarray:
         return (f_hz - self.f0_hz) / self.slope_hz_per_unit
 
+
 def default_size_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
     # outer product -> flattened NxM sizes
     A = np.sqrt(np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :])
     return 40.0 * A.reshape(-1)
+
 
 def interactive_grid_debug(
     tl: ResolvedTimeline,
@@ -67,7 +70,9 @@ def interactive_grid_debug(
 
     out = widgets.Output()
 
-    def _axis_limits_for_plane(plane: str, f_to_pos: Callable[[np.ndarray], np.ndarray]) -> Tuple[float, float]:
+    def _axis_limits_for_plane(
+        plane: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
+    ) -> Tuple[float, float]:
         spans = tl.planes.get(plane, [])
         if not spans:
             return (-1.0, 1.0)
@@ -75,7 +80,11 @@ def interactive_grid_debug(
         for sp in spans:
             freqs.append(sp.start.freqs_hz)
             freqs.append(sp.end.freqs_hz)
-        f = np.concatenate([x for x in freqs if x.size], axis=0) if any(x.size for x in freqs) else np.zeros((0,))
+        f = (
+            np.concatenate([x for x in freqs if x.size], axis=0)
+            if any(x.size for x in freqs)
+            else np.zeros((0,))
+        )
         if f.size == 0:
             return (-1.0, 1.0)
         x = f_to_pos(f)
@@ -117,13 +126,13 @@ def interactive_grid_debug(
         ax.clear()
         if show_segment_in_title:
             seg_name = _segment_name_at(t)
-            ax.set_title(f"{title} | {seg_name} | t={t*1e3:.3f} ms")
+            ax.set_title(f"{title} | {seg_name} | t={t * 1e3:.3f} ms")
         else:
-            ax.set_title(f"{title} | t={t*1e3:.3f} ms")
+            ax.set_title(f"{title} | t={t * 1e3:.3f} ms")
         ax.set_xlabel(f"{plane_h} position (arb)")
         ax.set_ylabel(f"{plane_v} position (arb)")
         ax.grid(True)
-        ax.scatter(X, Y, s=S, marker='o')
+        ax.scatter(X, Y, s=S, marker="o")
 
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
@@ -170,7 +179,5 @@ def interactive_grid_debug(
 
     with out:
         render_frame(0)
-
-
 
     return fig, ax

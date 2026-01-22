@@ -43,7 +43,9 @@ def _iter_instances_for_debug(
     if 0 not in steps:
         raise ValueError("Expected step_index 0 to exist (entry step)")
 
-    max_transitions = max_step_transitions if max_step_transitions is not None else len(steps) + 1
+    max_transitions = (
+        max_step_transitions if max_step_transitions is not None else len(steps) + 1
+    )
     if max_transitions <= 0:
         raise ValueError("max_step_transitions must be > 0")
 
@@ -56,7 +58,9 @@ def _iter_instances_for_debug(
         if reps_total <= 0:
             raise ValueError(f"Invalid loops={reps_total} for step {step.step_index}")
         for rep_index in range(reps_total):
-            order.append((step.step_index, step.segment_index, rep_index, reps_total, False))
+            order.append(
+                (step.step_index, step.segment_index, rep_index, reps_total, False)
+            )
         step_idx = int(step.next_step)
         if step_idx == entry:
             break
@@ -98,7 +102,9 @@ def unroll_compiled_sequence_for_debug(
     )
 
     seg_lens = [int(s.n_samples) for s in compiled.segments]
-    total = sum(seg_lens[seg_idx] for _step, seg_idx, _rep, _rep_total, _wrap in instances_spec)
+    total = sum(
+        seg_lens[seg_idx] for _step, seg_idx, _rep, _rep_total, _wrap in instances_spec
+    )
     out = np.zeros((n_channels, total), dtype=np.int16)
 
     instances: list[SegmentInstance] = []
@@ -181,7 +187,9 @@ def sequence_samples_debug(
             full_scale=full_scale,
         )
     if show_param_traces and q_ir is None:
-        raise ValueError("show_param_traces=True requires passing a ProgramIR (not a CompiledSequenceProgram)")
+        raise ValueError(
+            "show_param_traces=True requires passing a ProgramIR (not a CompiledSequenceProgram)"
+        )
 
     samples, instances = unroll_compiled_sequence_for_debug(
         compiled,
@@ -222,10 +230,19 @@ def sequence_samples_debug(
         param_channels = param_channels[:2]
 
     n_wave = len(channels)
-    n_param_rows = 2 if show_param_traces and len(param_channels) >= 2 else (1 if show_param_traces else 0)
+    n_param_rows = (
+        2
+        if show_param_traces and len(param_channels) >= 2
+        else (1 if show_param_traces else 0)
+    )
 
     fig = plt.figure(figsize=(14, 2.4 * max(1, n_param_rows) + 2.6 * n_wave))
-    gs = GridSpec(nrows=n_param_rows + n_wave, ncols=2, figure=fig, height_ratios=[1] * n_param_rows + [2] * n_wave)
+    gs = GridSpec(
+        nrows=n_param_rows + n_wave,
+        ncols=2,
+        figure=fig,
+        height_ratios=[1] * n_param_rows + [2] * n_wave,
+    )
 
     ax_param: list = []
     if show_param_traces:
@@ -241,7 +258,12 @@ def sequence_samples_debug(
                 fig.add_subplot(gs[1, 1], sharex=ax0),
             ]
 
-    axs = [fig.add_subplot(gs[n_param_rows + i, :], sharex=ax_param[0] if ax_param else None) for i in range(n_wave)]
+    axs = [
+        fig.add_subplot(
+            gs[n_param_rows + i, :], sharex=ax_param[0] if ax_param else None
+        )
+        for i in range(n_wave)
+    ]
 
     boundary_positions = [inst.start_sample for inst in instances]
     slider = None
@@ -283,7 +305,9 @@ def sequence_samples_debug(
     for ax, ch in zip(axs, channels):
         marker = "." if show_markers else ""
         markersize = 2 if show_markers else 0
-        (line,) = ax.plot([], [], linestyle="-", linewidth=0.8, marker=marker, markersize=markersize)
+        (line,) = ax.plot(
+            [], [], linestyle="-", linewidth=0.8, marker=marker, markersize=markersize
+        )
         wave_lines.append(line)
 
         planes = ",".join(sorted(ch_to_planes.get(ch, [])))
@@ -292,7 +316,12 @@ def sequence_samples_debug(
         ax.grid(True, alpha=0.3)
 
         if not full_view:
-            sel = ax.axvline(boundary_positions[0] if boundary_positions else 0, color="C3", linewidth=1.5, alpha=0.8)
+            sel = ax.axvline(
+                boundary_positions[0] if boundary_positions else 0,
+                color="C3",
+                linewidth=1.5,
+                alpha=0.8,
+            )
             selected_lines.append(sel)
 
     axs[-1].set_xlabel("Sample index (per-sample)")
@@ -305,7 +334,10 @@ def sequence_samples_debug(
     if show_param_traces and not full_view:
         for ax in ax_param:
             sel = ax.axvline(
-                boundary_positions[0] if boundary_positions else 0, color="C3", linewidth=1.5, alpha=0.8
+                boundary_positions[0] if boundary_positions else 0,
+                color="C3",
+                linewidth=1.5,
+                alpha=0.8,
             )
             selected_lines.append(sel)
 
@@ -332,7 +364,9 @@ def sequence_samples_debug(
             max_tones_cache[plane] = m
             return m
 
-        def _segment_params(seg_index: int, plane: str) -> tuple[np.ndarray, np.ndarray]:
+        def _segment_params(
+            seg_index: int, plane: str
+        ) -> tuple[np.ndarray, np.ndarray]:
             key = (int(seg_index), plane)
             if key in segment_param_cache:
                 return segment_param_cache[key]
@@ -348,7 +382,9 @@ def sequence_samples_debug(
                 pp = part.planes[plane]
                 if part.n_samples <= 0:
                     continue
-                f_part, a_part = _interp_plane_part(pp, n_samples=part.n_samples, sample_rate_hz=q_ir.sample_rate_hz)
+                f_part, a_part = _interp_plane_part(
+                    pp, n_samples=part.n_samples, sample_rate_hz=q_ir.sample_rate_hz
+                )
                 f_part = f_part.astype(np.float32, copy=False)
                 a_part = a_part.astype(np.float32, copy=False)
                 nt = int(f_part.shape[1])
@@ -389,7 +425,11 @@ def sequence_samples_debug(
     boundary_repeat: list[float] = []
     for j, inst in enumerate(instances):
         pos = float(inst.start_sample)
-        if j > 0 and instances[j - 1].segment_index == inst.segment_index and not inst.is_wrap_preview:
+        if (
+            j > 0
+            and instances[j - 1].segment_index == inst.segment_index
+            and not inst.is_wrap_preview
+        ):
             boundary_repeat.append(pos)
         else:
             boundary_solid.append(pos)
@@ -405,7 +445,7 @@ def sequence_samples_debug(
         segs[:, 1, 1] = 1.0
         return segs
 
-    for ax in (ax_param + axs):
+    for ax in ax_param + axs:
         if boundary_solid:
             lc_solid = LineCollection(
                 _vline_segments(boundary_solid),
@@ -475,7 +515,7 @@ def sequence_samples_debug(
         i = max(0, min(i, len(boundary_positions) - 1))
         pos = boundary_positions[i]
         x0w, x1w = _window_for_boundary(pos)
-        for ax in (ax_param + axs):
+        for ax in ax_param + axs:
             ax.set_xlim(x0w, x1w - 1 if x1w > x0w else x1w)
 
         # selected_lines contains first the wave axes, then param axes (if enabled).
@@ -552,7 +592,7 @@ def sequence_samples_debug(
 
     if full_view:
         fig.suptitle(title)
-        for ax in (ax_param + axs):
+        for ax in ax_param + axs:
             ax.set_xlim(0, total - 1 if total > 0 else 0)
         axs[-1].callbacks.connect("xlim_changed", _update_from_xlim)
         _update_from_xlim()
@@ -564,13 +604,16 @@ def sequence_samples_debug(
     _set_view(0)
 
     if slider is not None:
+
         def _on_slider_change(val):
             _set_view(int(val))
 
         slider.on_changed(_on_slider_change)
 
         # Keep widgets alive even if the caller ignores the return value.
-        fig._awgsegmentfactory_widgets = getattr(fig, "_awgsegmentfactory_widgets", []) + [slider]  # type: ignore[attr-defined]
+        fig._awgsegmentfactory_widgets = getattr(
+            fig, "_awgsegmentfactory_widgets", []
+        ) + [slider]  # type: ignore[attr-defined]
 
     fig.subplots_adjust(bottom=0.08, top=0.93, hspace=0.35, wspace=0.25)
     return fig, axs, slider

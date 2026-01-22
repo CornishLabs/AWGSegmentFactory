@@ -41,7 +41,9 @@ def _smoothstep_min_jerk(u: np.ndarray) -> np.ndarray:
     return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
 
-def _interp_plane_part(pp: PlanePartIR, *, n_samples: int, sample_rate_hz: float) -> tuple[np.ndarray, np.ndarray]:
+def _interp_plane_part(
+    pp: PlanePartIR, *, n_samples: int, sample_rate_hz: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Returns (freqs_hz, amps) as (n_samples, n_tones) arrays.
     """
@@ -104,7 +106,9 @@ def _synth_part(
     - y is (n_samples,) float waveform
     - phase_end is (n_tones,) phase at the end of the part (for carry)
     """
-    freqs, amps = _interp_plane_part(pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz)
+    freqs, amps = _interp_plane_part(
+        pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz
+    )
     if freqs.shape[1] != phase0_rad.shape[0]:
         raise ValueError("phase0 length mismatch with tone count")
 
@@ -152,7 +156,12 @@ def _synth_plane_segment(
     ys: list[np.ndarray] = []
     for part in seg.parts:
         pp = part.planes[plane]
-        y, phase = _synth_part(pp, n_samples=part.n_samples, sample_rate_hz=sample_rate_hz, phase0_rad=phase)
+        y, phase = _synth_part(
+            pp,
+            n_samples=part.n_samples,
+            sample_rate_hz=sample_rate_hz,
+            phase0_rad=phase,
+        )
         ys.append(y)
     return np.concatenate(ys, axis=0), phase
 
@@ -221,7 +230,9 @@ def compile_sequence_program(
             samp = np.round(y * (clip * float(full_scale))).astype(np.int16)
             data[ch, :] = samp
 
-        compiled_segments.append(CompiledSegment(name=seg.name, n_samples=n, data_i16=data))
+        compiled_segments.append(
+            CompiledSegment(name=seg.name, n_samples=n, data_i16=data)
+        )
 
         on_trig = seg.mode == "wait_trig"
         loops = int(seg.loop) if seg.mode == "loop_n" else 1
