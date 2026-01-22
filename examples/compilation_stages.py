@@ -20,6 +20,7 @@ import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.program_ir import ResolvedLogicalChannelPart
+from awgsegmentfactory.interpolation import interp_param
 from awgsegmentfactory.sequence_compile import quantize_resolved_ir
 
 
@@ -44,10 +45,6 @@ def _describe_ir(ir) -> None:
         for i, part in enumerate(seg.parts):
             kinds = {lc: part.logical_channels[lc].interp for lc in ir.logical_channels}
             print(f"  part {i}: n_samples={part.n_samples} kinds={kinds}")
-
-
-def _interp_min_jerk(u: np.ndarray) -> np.ndarray:
-    return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 
 
 def _logical_channel_part_to_arrays(
@@ -84,29 +81,12 @@ def _logical_channel_part_to_arrays(
 
     # u in [0,1)
     u = np.linspace(0.0, 1.0, n_samples, endpoint=False, dtype=float)[:, None]
+    t_rel = t[:, None]
 
-    if pp.interp == "min_jerk":
-        u = _interp_min_jerk(u)
-
-    if pp.interp == "linear" or pp.interp == "min_jerk":
-        freqs = f0[None, :] + (f1 - f0)[None, :] * u
-        amps = a0[None, :] + (a1 - a0)[None, :] * u
-        phases = p0[None, :] + (p1 - p0)[None, :] * u
-        return freqs, amps, phases
-
-    if pp.interp == "exp":
-        if pp.tau_s is None or pp.tau_s <= 0:
-            freqs = f0[None, :] + (f1 - f0)[None, :] * u
-            amps = a0[None, :] + (a1 - a0)[None, :] * u
-            phases = p0[None, :] + (p1 - p0)[None, :] * u
-            return freqs, amps, phases
-        k = np.exp(-t[:, None] / float(pp.tau_s))
-        freqs = f1[None, :] + (f0 - f1)[None, :] * k
-        amps = a1[None, :] + (a0 - a1)[None, :] * k
-        phases = p1[None, :] + (p0 - p1)[None, :] * k
-        return freqs, amps, phases
-
-    raise ValueError(f"Unknown interp {pp.interp!r}")
+    freqs = interp_param(f0, f1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
+    amps = interp_param(a0, a1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
+    phases = interp_param(p0, p1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
+    return freqs, amps, phases
 
 
 def _tonebank_to_samples(

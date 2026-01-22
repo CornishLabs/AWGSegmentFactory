@@ -1,9 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Literal
+from typing import Dict, List, Optional
 import numpy as np
 
-InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
+from .ir import InterpKind
+from .interpolation import interp_param
 
 
 @dataclass(frozen=True)
@@ -26,10 +27,6 @@ class Span:
     def duration(self) -> float:
         return self.t1 - self.t0
 
-    def _smoothstep_minjerk(self, u: float) -> float:
-        # classic 5th order minimum-jerk polynomial
-        return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
-
     def state_at(self, t: float) -> LogicalChannelState:
         if t <= self.t0:
             return self.start
@@ -47,34 +44,11 @@ class Span:
         if self.interp == "hold":
             return self.start
 
-        if self.interp == "min_jerk":
-            uu = self._smoothstep_minjerk(float(u))
-            freqs = f0 + (f1 - f0) * uu
-            amps = a0 + (a1 - a0) * uu
-            phases = p0 + (p1 - p0) * uu
-            return LogicalChannelState(freqs, amps, phases)
-
-        if self.interp == "linear":
-            freqs = f0 + (f1 - f0) * u
-            amps = a0 + (a1 - a0) * u
-            phases = p0 + (p1 - p0) * u
-            return LogicalChannelState(freqs, amps, phases)
-
-        if self.interp == "exp":
-            # interpret as exponential approach for AMPLITUDES primarily; freqs/phases usually constant
-            if self.tau_s is None or self.tau_s <= 0:
-                freqs = f0 + (f1 - f0) * u
-                amps = a0 + (a1 - a0) * u
-                phases = p0 + (p1 - p0) * u
-                return LogicalChannelState(freqs, amps, phases)
-            x = t - self.t0
-            k = np.exp(-x / self.tau_s)
-            freqs = f1 + (f0 - f1) * k
-            amps = a1 + (a0 - a1) * k
-            phases = p1 + (p0 - p1) * k
-            return LogicalChannelState(freqs, amps, phases)
-
-        raise ValueError(f"Unknown interp {self.interp!r}")
+        x = t - self.t0
+        freqs = interp_param(f0, f1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
+        amps = interp_param(a0, a1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
+        phases = interp_param(p0, p1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
+        return LogicalChannelState(freqs, amps, phases)
 
 
 @dataclass

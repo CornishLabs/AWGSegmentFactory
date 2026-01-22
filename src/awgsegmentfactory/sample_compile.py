@@ -6,6 +6,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from .program_ir import ResolvedLogicalChannelPart, ResolvedSegment
+from .interpolation import interp_param
 from .sequence_compile import QuantizedIR, SegmentQuantizationInfo
 
 
@@ -37,10 +38,6 @@ class CompiledSequenceProgram:
     quantization: Tuple[SegmentQuantizationInfo, ...]
 
 
-def _smoothstep_min_jerk(u: np.ndarray) -> np.ndarray:
-    return u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
-
-
 def _interp_logical_channel_part(
     pp: ResolvedLogicalChannelPart, *, n_samples: int, sample_rate_hz: float
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -69,27 +66,14 @@ def _interp_logical_channel_part(
         return freqs, amps
 
     u = (np.arange(n_samples, dtype=float) / float(n_samples))[:, None]  # [0,1)
-    if pp.interp == "min_jerk":
-        u = _smoothstep_min_jerk(u)
-
-    if pp.interp in ("linear", "min_jerk"):
-        freqs = f0[None, :] + (f1 - f0)[None, :] * u
-        amps = a0[None, :] + (a1 - a0)[None, :] * u
-        return freqs, amps
-
-    if pp.interp == "exp":
-        tau = pp.tau_s
-        if tau is None or tau <= 0:
-            freqs = f0[None, :] + (f1 - f0)[None, :] * u
-            amps = a0[None, :] + (a1 - a0)[None, :] * u
-            return freqs, amps
-        t = (np.arange(n_samples, dtype=float) / float(sample_rate_hz))[:, None]
-        k = np.exp(-t / float(tau))
-        freqs = f1[None, :] + (f0 - f1)[None, :] * k
-        amps = a1[None, :] + (a0 - a1)[None, :] * k
-        return freqs, amps
-
-    raise ValueError(f"Unknown interp {pp.interp!r}")
+    t = (np.arange(n_samples, dtype=float) / float(sample_rate_hz))[:, None]
+    freqs = interp_param(
+        f0, f1, kind=pp.interp, u=u, t_s=t, tau_s=pp.tau_s
+    )
+    amps = interp_param(
+        a0, a1, kind=pp.interp, u=u, t_s=t, tau_s=pp.tau_s
+    )
+    return freqs, amps
 
 
 def _synth_part(
