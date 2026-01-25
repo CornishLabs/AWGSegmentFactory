@@ -8,8 +8,8 @@ from typing import Callable, Dict, Sequence
 
 from ..builder import AWGProgramBuilder
 from ..resolve import resolve_intent_ir
-from ..sample_compile import CompiledSequenceProgram, compile_sequence_program
-from ..sequence_compile import quantize_resolved_ir
+from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
+from ..quantize import quantize_resolved_ir
 
 
 @dataclass(frozen=True)

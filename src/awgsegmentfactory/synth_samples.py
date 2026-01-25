@@ -11,9 +11,9 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .program_ir import ResolvedLogicalChannelPart, ResolvedSegment
+from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 from .interpolation import interp_param
-from .sequence_compile import QuantizedIR, SegmentQuantizationInfo
+from .quantize import QuantizedIR, SegmentQuantizationInfo
 
 
 @dataclass(frozen=True)

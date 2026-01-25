@@ -11,10 +11,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..program_ir import ResolvedIR
-from ..sample_compile import CompiledSequenceProgram, compile_sequence_program
-from ..sample_compile import _interp_logical_channel_part as _interp_logical_channel_part
-from ..sequence_compile import QuantizedIR, quantize_resolved_ir
+from ..resolved_ir import ResolvedIR
+from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
+from ..synth_samples import (
+    _interp_logical_channel_part as _interp_logical_channel_part,
+)
+from ..quantize import QuantizedIR, quantize_resolved_ir
 
 
 @dataclass(frozen=True)

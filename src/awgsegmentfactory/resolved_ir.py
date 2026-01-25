@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-from .ir import InterpKind, SegmentMode, SegmentPhaseMode
-from .timeline import LogicalChannelState, ResolvedTimeline, Span
+from .intent_ir import InterpKind, SegmentMode, SegmentPhaseMode
+from .resolved_timeline import LogicalChannelState, ResolvedTimeline, Span
 
 
 @dataclass(frozen=True)

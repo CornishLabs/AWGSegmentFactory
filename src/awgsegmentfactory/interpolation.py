@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-from .ir import InterpKind
+from .intent_ir import InterpKind
 
 
 def smoothstep_min_jerk(u: float | np.ndarray) -> float | np.ndarray:

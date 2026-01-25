@@ -1,6 +1,7 @@
 """Intent IR dataclasses (continuous-time program specification).
 
 This module defines the "what the user wants" representation produced by the builder.
+It is named `intent_ir` to distinguish it from the later `resolved_ir` stage.
 It is later resolved into integer-sample primitives by `resolve_intent_ir(...)`.
 """
 

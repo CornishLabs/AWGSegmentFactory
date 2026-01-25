@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.ir import HoldOp, RemapFromDefOp, UseDefOp
-from awgsegmentfactory.sequence_compile import quantize_resolved_ir
+from awgsegmentfactory.intent_ir import HoldOp, RemapFromDefOp, UseDefOp
+from awgsegmentfactory.quantize import quantize_resolved_ir
 
 
 class TestBuilder(unittest.TestCase):

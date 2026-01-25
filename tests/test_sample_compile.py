@@ -2,15 +2,15 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory.program_ir import (
+from awgsegmentfactory.resolved_ir import (
     ResolvedIR,
     ResolvedLogicalChannelPart,
     ResolvedPart,
     ResolvedSegment,
 )
-from awgsegmentfactory.sample_compile import compile_sequence_program
-from awgsegmentfactory.sequence_compile import quantize_resolved_ir
-from awgsegmentfactory.timeline import LogicalChannelState
+from awgsegmentfactory.synth_samples import compile_sequence_program
+from awgsegmentfactory.quantize import quantize_resolved_ir
+from awgsegmentfactory.resolved_timeline import LogicalChannelState
 
 
 def _empty_logical_channel_state() -> LogicalChannelState:

@@ -14,13 +14,13 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .program_ir import (
+from .resolved_ir import (
     ResolvedIR,
     ResolvedLogicalChannelPart,
     ResolvedPart,
     ResolvedSegment,
 )
-from .timeline import LogicalChannelState
+from .resolved_timeline import LogicalChannelState
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory.ir import (
+from awgsegmentfactory.intent_ir import (
     IntentDefinition,
     HoldOp,
     MoveOp,

@@ -6,7 +6,7 @@ into builder ops. The core compilation pipeline operates on frequency deltas dir
 
 from __future__ import annotations
 from dataclasses import dataclass
-from .ir import PositionToFreqCalib, ToneId
+from .intent_ir import PositionToFreqCalib, ToneId
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ import bisect
 
 import numpy as np
 
-from ..timeline import ResolvedTimeline
+from ..resolved_timeline import ResolvedTimeline
 
 
 @dataclass(frozen=True)

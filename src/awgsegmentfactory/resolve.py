@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 
-from .ir import (
+from .intent_ir import (
     IntentIR,
     HoldOp,
     UseDefOp,
@@ -16,13 +16,13 @@ from .ir import (
     RampAmpToOp,
     RemapFromDefOp,
 )
-from .program_ir import (
+from .resolved_ir import (
     ResolvedIR,
     ResolvedLogicalChannelPart,
     ResolvedPart,
     ResolvedSegment,
 )
-from .timeline import LogicalChannelState
+from .resolved_timeline import LogicalChannelState
 
 
 def _empty_state() -> LogicalChannelState:

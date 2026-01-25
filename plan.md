@@ -10,9 +10,10 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 2. **`src/awgsegmentfactory/builder.py`**
 
    * The “front-end”: the fluent chain that records user intent into a spec.
-3. **`src/awgsegmentfactory/ir.py`**
+3. **`src/awgsegmentfactory/intent_ir.py`**
 
-   * The “data model”: the classes that represent program specs + resolved IR.
+   * The “intent data model”: the classes that represent program specs (continuous-time intent).
+   * For resolved/integer-sample IR, see `src/awgsegmentfactory/resolved_ir.py`.
 4. **`src/awgsegmentfactory/resolve.py`** (or whatever your resolver file is named)
 
    * The “compiler stage 1”: turns the spec into resolved, explicit per-part start/end states.
@@ -33,13 +34,13 @@ Here’s the intent of each file (as we’ve been shaping it), plus a good readi
 **Does:** collects user calls (`segment()`, `tones()`, `move()`, `hold()`, etc.) into an **IntentIR** (a list of segments + ops).
 **Should NOT do:** heavy computation, snapping, interpolation math, sampling.
 
-### `ir.py`
+### `intent_ir.py`
 
 **Intent:** formal, stable “contract” between stages.
 **Does:** defines:
 
 * **Spec-level types** (what the builder emits): segments, ops (move/ramp/hold/remap), definitions, logical channels
-* **Resolved IR types** (what the resolver emits): a timeline broken into parts with explicit `start_state`, `end_state`, `duration`, `interp`, etc.
+* The resolved/integer-sample IR lives in `src/awgsegmentfactory/resolved_ir.py`.
 
 ### `resolve.py` (or similar)
 
@@ -72,7 +73,7 @@ This is where the “state should carry across segments” rule is enforced.
 ## Quick mental model
 
 * **Builder** = *nice to write*
-* **Spec (in `ir.py`)** = *recorded intent*
+* **Spec (in `intent_ir.py`)** = *recorded intent*
 * **Resolver** = *turn intent into explicit timeline states*
 * **Resolved IR** = *easy to compile & cache*
 * **Debug plot** = *see if it matches your intent*
@@ -264,7 +265,8 @@ No need to put everything in `host_setup()`; `prepare_point` is the correct hook
 1. **Fix/ensure state propagation** across segments (no resets unless `use_def` is called).
 2. IR structures:
 
-   * `ir.py`: dataclasses for `IntentIR`, `IntentSegment`, ops; and `ResolvedIR`, `ResolvedSegment`, `ResolvedPart`, `State`.
+   * `intent_ir.py`: dataclasses for `IntentIR`, `IntentSegment`, ops.
+   * `resolved_ir.py`: dataclasses for `ResolvedIR`, `ResolvedSegment`, `ResolvedPart`, `ResolvedLogicalChannelPart`.
 3. Resolver:
 
    * `resolve.py`: apply ops into a persistent `current_state` across segments.

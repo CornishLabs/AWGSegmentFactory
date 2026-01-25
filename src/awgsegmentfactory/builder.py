@@ -7,7 +7,7 @@ The builder is the user-facing API. It records operations into a continuous-time
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .ir import (
+from .intent_ir import (
     IntentIR,
     IntentSegment,
     SegmentMode,
@@ -19,7 +19,7 @@ from .ir import (
     RampAmpToOp,
     RemapFromDefOp,
 )
-from .program_ir import ResolvedIR
+from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
 
 

@@ -90,19 +90,19 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 
 1) **Build (intent)** (`src/awgsegmentfactory/builder.py`)
    - `AWGProgramBuilder` records your fluent calls into an `IntentIR` (`build_intent_ir()`).
-2) **Intent IR** (`src/awgsegmentfactory/ir.py`)
+2) **Intent IR** (`src/awgsegmentfactory/intent_ir.py`)
    - `IntentIR` is continuous-time intent: logical channels/definitions/segments and ops with `time_s` in seconds.
-3) **Resolve (discretize)** (`src/awgsegmentfactory/resolve.py` + `src/awgsegmentfactory/program_ir.py`)
+3) **Resolve (discretize)** (`src/awgsegmentfactory/resolve.py` + `src/awgsegmentfactory/resolved_ir.py`)
    - `resolve_intent_ir(intent, sample_rate_hz=...)` converts seconds → integer `n_samples` and produces `ResolvedIR`.
-4) **Quantise for hardware** (`src/awgsegmentfactory/sequence_compile.py`)
+4) **Quantise for hardware** (`src/awgsegmentfactory/quantize.py`)
    - `quantize_resolved_ir(resolved, logical_channel_to_hardware_channel=...)` returns a `QuantizedIR`:
      a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
-5) **Samples** (`src/awgsegmentfactory/sample_compile.py`)
+5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
    - `compile_sequence_program(quantized, ...)` synthesises per-segment int16 waveforms plus a sequence
      step table (`CompiledSequenceProgram`).
 
 For plotting/state queries there is also a debug view:
-- `ResolvedTimeline` (`src/awgsegmentfactory/timeline.py`) and `ResolvedIR.to_timeline()`
+- `ResolvedTimeline` (`src/awgsegmentfactory/resolved_timeline.py`) and `ResolvedIR.to_timeline()`
 
 ## Structure understanding
 
@@ -117,7 +117,7 @@ for later hardware constraints like sequence quantisation and minimum segment si
 In this code, that is the `IntentIR` class. This is primarily formed of `IntentSegment`s which contain
 operations (`Op`s) with durations in seconds.
 
-This is then turned into a more verbose, but still logical, implementation plan at this point, some hardware considerations have been made. That is the 'program_ir' (the IR which is good for compilation) we have:
+This is then turned into a more verbose, but still logical, implementation plan at this point, some hardware considerations have been made. That is the resolved IR (the IR which is good for compilation) we have:
 A whole program is now represented by:
 `ResolvedIR`, which is formed of `ResolvedSegment`s that themselves are composed of `ResolvedPart`s, which are composed of `ResolvedLogicalChannelPart` (what each logical channel does in this part).
 
@@ -135,12 +135,12 @@ Interpretation of the quantized IR to produce samples is done by `compile_sequen
 
 1) `examples/compilation_stages.py` – end-to-end overview of the pipeline.
 2) `src/awgsegmentfactory/builder.py` – fluent API and spec construction.
-3) `src/awgsegmentfactory/ir.py` – intent IR (ops/spec types).
+3) `src/awgsegmentfactory/intent_ir.py` – intent IR (ops/spec types).
 4) `src/awgsegmentfactory/resolve.py` – resolver (`IntentIR` → `ResolvedIR`).
-5) `src/awgsegmentfactory/program_ir.py` – resolved IR dataclasses and helpers.
-6) `src/awgsegmentfactory/sequence_compile.py` – quantisation (`ResolvedIR` → `QuantizedIR`) + wrap snapping.
-7) `src/awgsegmentfactory/sample_compile.py` – synthesis (`QuantizedIR` → `CompiledSequenceProgram`).
-8) `src/awgsegmentfactory/timeline.py` – debug timeline spans and interpolation.
+5) `src/awgsegmentfactory/resolved_ir.py` – resolved IR dataclasses and helpers.
+6) `src/awgsegmentfactory/quantize.py` – quantisation (`ResolvedIR` → `QuantizedIR`) + wrap snapping.
+7) `src/awgsegmentfactory/synth_samples.py` – synthesis (`QuantizedIR` → `CompiledSequenceProgram`).
+8) `src/awgsegmentfactory/resolved_timeline.py` – debug timeline spans and interpolation.
 9) `src/awgsegmentfactory/debug/` – optional plotting helpers (Jupyter + matplotlib).
 
 ## Notes / current limitations

@@ -19,9 +19,9 @@ from typing import Tuple
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.program_ir import ResolvedLogicalChannelPart
+from awgsegmentfactory.resolved_ir import ResolvedLogicalChannelPart
 from awgsegmentfactory.interpolation import interp_param
-from awgsegmentfactory.sequence_compile import quantize_resolved_ir
+from awgsegmentfactory.quantize import quantize_resolved_ir
 
 
 def _describe_intent(intent) -> None:

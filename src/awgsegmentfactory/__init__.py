@@ -7,11 +7,11 @@ This package implements a small pipeline:
 
 from .builder import AWGProgramBuilder
 from .calibration import LinearPositionToFreqCalib
-from .ir import IntentIR
-from .program_ir import ResolvedIR
+from .intent_ir import IntentIR
+from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
-from .sample_compile import CompiledSequenceProgram, compile_sequence_program
-from .sequence_compile import (
+from .synth_samples import CompiledSequenceProgram, compile_sequence_program
+from .quantize import (
     QuantizedIR,
     SegmentQuantizationInfo,
     format_samples_time,

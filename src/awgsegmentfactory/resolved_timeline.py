@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 import numpy as np
 
-from .ir import InterpKind
+from .intent_ir import InterpKind
 from .interpolation import interp_param
 
 
