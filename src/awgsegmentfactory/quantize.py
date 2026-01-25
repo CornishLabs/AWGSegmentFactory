@@ -10,7 +10,7 @@ The result is a `QuantizedIR` (a `ResolvedIR` plus quantization metadata and cha
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -21,6 +21,7 @@ from .resolved_ir import (
     ResolvedSegment,
 )
 from .resolved_timeline import LogicalChannelState
+from .types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -52,28 +53,28 @@ class SegmentQuantizationInfo:
 class QuantizedIR:
     """Output of `quantize_resolved_ir`: a resolved IR plus quantization metadata."""
 
-    ir: ResolvedIR
-    logical_channel_to_hardware_channel: Dict[str, int]
+    resolved_ir: ResolvedIR
+    logical_channel_to_hardware_channel: ChannelMap
     quantization: tuple[SegmentQuantizationInfo, ...]
 
     @property
     def sample_rate_hz(self) -> float:
         """Sample rate in Hz (forwarded from the underlying resolved IR)."""
-        return float(self.ir.sample_rate_hz)
+        return float(self.resolved_ir.sample_rate_hz)
 
     @property
     def logical_channels(self) -> tuple[str, ...]:
         """Ordered logical channel names present in the program."""
-        return self.ir.logical_channels
+        return self.resolved_ir.logical_channels
 
     @property
     def segments(self) -> tuple[ResolvedSegment, ...]:
         """Quantized resolved segments (pattern-memory candidates)."""
-        return self.ir.segments
+        return self.resolved_ir.segments
 
     def to_timeline(self):
         """Convenience: forward to `ResolvedIR.to_timeline()` for debug plotting."""
-        return self.ir.to_timeline()
+        return self.resolved_ir.to_timeline()
 
 
 def format_samples_time(
@@ -185,7 +186,7 @@ def _snap_freqs_to_wrap(
 def quantize_resolved_ir(
     ir: ResolvedIR,
     *,
-    logical_channel_to_hardware_channel: Dict[str, int],
+    logical_channel_to_hardware_channel: ChannelMap,
     segment_quantum_s: float = 40e-6,
     step_samples: int = 32,
 ) -> QuantizedIR:
@@ -296,7 +297,7 @@ def quantize_resolved_ir(
             seg_len = n1
             new_parts: list[ResolvedPart] = []
             for part in parts:
-                new_logical_channels: Dict[str, ResolvedLogicalChannelPart] = {}
+                new_logical_channels: dict[str, ResolvedLogicalChannelPart] = {}
                 for lc in ir.logical_channels:
                     pp = part.logical_channels[lc]
                     snapped = _snap_freqs_to_wrap(
@@ -332,7 +333,7 @@ def quantize_resolved_ir(
         segments=tuple(out_segments),
     )
     return QuantizedIR(
-        ir=q_ir,
+        resolved_ir=q_ir,
         logical_channel_to_hardware_channel=dict(logical_channel_to_hardware_channel),
         quantization=tuple(infos),
     )

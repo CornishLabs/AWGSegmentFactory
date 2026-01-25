@@ -80,7 +80,7 @@ def interactive_grid_debug(
         logical_channel: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
     ) -> Tuple[float, float]:
         """Compute padded axis limits from all span endpoints for a logical channel."""
-        spans = tl.logical_channels.get(logical_channel, [])
+        spans = tl.spans_by_logical_channel.get(logical_channel, [])
         if not spans:
             return (-1.0, 1.0)
         freqs: list[np.ndarray] = []

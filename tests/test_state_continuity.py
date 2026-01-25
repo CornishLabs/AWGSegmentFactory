@@ -99,7 +99,7 @@ class TestStateContinuity(unittest.TestCase):
 
         # Structural check: every logical-channel span list covers the full timeline with no gaps.
         for logical_channel in ("H", "V"):
-            spans = tl.logical_channels[logical_channel]
+            spans = tl.spans_by_logical_channel[logical_channel]
             self.assertEqual(spans[0].t0, 0.0)
             for prev, cur in zip(spans, spans[1:]):
                 self.assertEqual(prev.t1, cur.t0)

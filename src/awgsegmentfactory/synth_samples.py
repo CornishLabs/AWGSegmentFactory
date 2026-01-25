@@ -7,13 +7,14 @@ builds a simple step table (sequence memory) that chains segments in order.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
 from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 from .interpolation import interp_param
 from .quantize import QuantizedIR, SegmentQuantizationInfo
+from .types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ class CompiledSequenceProgram:
     """Final compiler output: segments (pattern memory) plus steps (sequence memory)."""
 
     sample_rate_hz: float
-    logical_channel_to_hardware_channel: Dict[str, int]
+    logical_channel_to_hardware_channel: ChannelMap
     gain: float
     clip: float
     full_scale: int
@@ -184,7 +185,7 @@ def compile_sequence_program(
     if full_scale > max_i16:
         raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
 
-    q_ir = quantized.ir
+    q_ir = quantized.resolved_ir
     logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
     q_info = quantized.quantization
 
@@ -198,7 +199,7 @@ def compile_sequence_program(
     compiled_steps: list[SequenceStep] = []
 
     # Phase state carried across segments, per logical channel.
-    phase_state: Dict[str, np.ndarray] = {}
+    phase_state: dict[str, np.ndarray] = {}
 
     for i, seg in enumerate(q_ir.segments):
         n = seg.n_samples

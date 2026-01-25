@@ -58,7 +58,7 @@ class TestSequenceCompile(unittest.TestCase):
         quantized = quantize_resolved_ir(
             ir, logical_channel_to_hardware_channel={"H": 0, "V": 1}
         )
-        q_ir = quantized.ir
+        q_ir = quantized.resolved_ir
         info = quantized.quantization
         self.assertEqual(info[0].original_samples, 193)
         self.assertEqual(info[0].quantized_samples, 224)
@@ -102,7 +102,7 @@ class TestSequenceCompile(unittest.TestCase):
             ir,
             logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
         )
-        q_ir = quantized.ir
+        q_ir = quantized.resolved_ir
         info = quantized.quantization
 
         # 110 rounded to nearest multiple of 32 -> 96, and 4 active channels -> min segment is 96.

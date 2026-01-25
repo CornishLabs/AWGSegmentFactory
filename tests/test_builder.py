@@ -102,7 +102,7 @@ class TestBuilder(unittest.TestCase):
             ir,
             logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
         )
-        q_ir = quantized.ir
+        q_ir = quantized.resolved_ir
         q_info = quantized.quantization
         self.assertEqual(q_ir.segments[0].n_samples, 96)
         self.assertEqual(q_info[0].original_samples, 110)

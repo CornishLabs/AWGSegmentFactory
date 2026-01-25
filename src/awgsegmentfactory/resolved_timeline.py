@@ -73,13 +73,13 @@ class ResolvedTimeline:
     """
 
     sample_rate_hz: float
-    logical_channels: Dict[str, List[Span]]
+    spans_by_logical_channel: Dict[str, List[Span]]
     segment_starts: List[tuple[float, str]]
     t_end: float
 
     def state_at(self, logical_channel: str, t: float) -> LogicalChannelState:
         """Get the logical-channel state at time `t`, holding across any gaps."""
-        spans = self.logical_channels[logical_channel]
+        spans = self.spans_by_logical_channel[logical_channel]
         if not spans:
             raise ValueError(f"No spans available for logical_channel {logical_channel!r}")
         if t <= spans[0].t0:

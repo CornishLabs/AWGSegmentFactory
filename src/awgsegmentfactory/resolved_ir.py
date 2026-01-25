@@ -79,7 +79,9 @@ class ResolvedIR:
 
     def to_timeline(self) -> ResolvedTimeline:
         """Convert into a debug-friendly `ResolvedTimeline` of per-channel `Span`s."""
-        spans: Dict[str, list[Span]] = {lc: [] for lc in self.logical_channels}
+        spans_by_logical_channel: Dict[str, list[Span]] = {
+            lc: [] for lc in self.logical_channels
+        }
         segment_starts: list[tuple[float, str]] = []
 
         fs = float(self.sample_rate_hz)
@@ -91,7 +93,7 @@ class ResolvedIR:
                 t1 = (n0 + part.n_samples) / fs
                 for lc in self.logical_channels:
                     pp = part.logical_channels[lc]
-                    spans[lc].append(
+                    spans_by_logical_channel[lc].append(
                         Span(
                             t0=t0,
                             t1=t1,
@@ -106,7 +108,7 @@ class ResolvedIR:
 
         return ResolvedTimeline(
             sample_rate_hz=fs,
-            logical_channels=spans,
+            spans_by_logical_channel=spans_by_logical_channel,
             segment_starts=segment_starts,
             t_end=n0 / fs,
         )

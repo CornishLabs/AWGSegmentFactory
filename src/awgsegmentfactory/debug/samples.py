@@ -17,6 +17,7 @@ from ..synth_samples import (
     _interp_logical_channel_part as _interp_logical_channel_part,
 )
 from ..quantize import QuantizedIR, quantize_resolved_ir
+from ..types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,7 @@ def unroll_compiled_sequence_for_debug(
 def sequence_samples_debug(
     program: ResolvedIR | QuantizedIR | CompiledSequenceProgram,
     *,
-    logical_channel_to_hardware_channel: Optional[Dict[str, int]] = None,
+    logical_channel_to_hardware_channel: Optional[ChannelMap] = None,
     wait_trig_loops: int = 3,
     include_wrap_preview: bool = True,
     gain: float = 1.0,
@@ -186,7 +187,7 @@ def sequence_samples_debug(
     if isinstance(program, CompiledSequenceProgram):
         compiled = program
     elif isinstance(program, QuantizedIR):
-        q_ir = program.ir
+        q_ir = program.resolved_ir
         compiled = compile_sequence_program(
             program, gain=gain, clip=clip, full_scale=full_scale
         )
@@ -199,7 +200,7 @@ def sequence_samples_debug(
             program,
             logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         )
-        q_ir = quantized.ir
+        q_ir = quantized.resolved_ir
         compiled = compile_sequence_program(
             quantized,
             gain=gain,

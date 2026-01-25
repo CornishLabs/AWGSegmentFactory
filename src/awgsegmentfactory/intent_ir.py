@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, NewType, Optional, Tuple, Literal
 
-SegmentMode = Literal["loop_n", "wait_trig", "once"]
+SegmentMode = Literal["loop_n", "wait_trig"]
 InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
 SegmentPhaseMode = Literal["carry", "fixed"]
 
@@ -48,7 +48,7 @@ class IntentSegment:
 
     name: str
     mode: SegmentMode
-    loop: int  # for loop_n/once. For wait_trig set loop=1.
+    loop: int  # for loop_n. For wait_trig set loop=1.
     ops: Tuple["Op", ...]
     phase_mode: SegmentPhaseMode = "carry"
 

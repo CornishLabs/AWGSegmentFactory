@@ -18,6 +18,7 @@ from .quantize import (
     quantize_resolved_ir,
     quantum_samples,
 )
+from .types import ChannelMap
 
 __all__ = [
     "AWGProgramBuilder",
@@ -32,4 +33,5 @@ __all__ = [
     "format_samples_time",
     "quantize_resolved_ir",
     "quantum_samples",
+    "ChannelMap",
 ]

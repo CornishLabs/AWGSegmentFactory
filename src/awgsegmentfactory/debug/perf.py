@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, Dict, Sequence
+from typing import Callable, Sequence
 
 from ..builder import AWGProgramBuilder
 from ..resolve import resolve_intent_ir
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
 from ..quantize import quantize_resolved_ir
+from ..types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ def compile_builder_pipeline_timed(
     builder: AWGProgramBuilder,
     *,
     sample_rate_hz: float,
-    logical_channel_to_hardware_channel: Dict[str, int],
+    logical_channel_to_hardware_channel: ChannelMap,
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
@@ -66,7 +67,7 @@ def benchmark_builder_pipeline(
     build_builder: Callable[[], AWGProgramBuilder],
     *,
     sample_rate_hz: float,
-    logical_channel_to_hardware_channel: Dict[str, int],
+    logical_channel_to_hardware_channel: ChannelMap,
     iters: int = 5,
     warmup: int = 1,
     gain: float = 1.0,
