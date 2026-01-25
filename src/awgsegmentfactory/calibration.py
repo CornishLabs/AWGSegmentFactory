@@ -1,3 +1,9 @@
+"""Calibration helpers for higher-level, position-like operations.
+
+Calibrations are currently stored on `IntentIR.calibrations` for future integration
+into builder ops. The core compilation pipeline operates on frequency deltas directly.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from .ir import PositionToFreqCalib, ToneId
@@ -15,4 +21,5 @@ class LinearPositionToFreqCalib(PositionToFreqCalib):
     slope_hz_per_um: float
 
     def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float:
+        """Return `slope_hz_per_um * dx_um` (ignores tone/channel)."""
         return self.slope_hz_per_um * float(dx_um)

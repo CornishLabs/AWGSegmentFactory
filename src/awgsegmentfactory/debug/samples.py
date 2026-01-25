@@ -1,3 +1,9 @@
+"""Sample-level debug/inspection helpers.
+
+These utilities unroll a compiled Spectrum-like sequence program into a contiguous
+sample buffer and render it with segment/repeat boundary markers for inspection.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +19,8 @@ from ..sequence_compile import QuantizedIR, quantize_resolved_ir
 
 @dataclass(frozen=True)
 class SegmentInstance:
+    """One occurrence of a segment during debug-unrolled playback (with boundaries)."""
+
     start_sample: int
     stop_sample: int
     step_index: int
@@ -299,6 +307,7 @@ def sequence_samples_debug(
     max_tones_cache: Dict[str, int] = {}
 
     def _window_for_boundary(sample_pos: int) -> tuple[int, int]:
+        """Compute the [x0, x1) window centered on a boundary sample index."""
         if window_samples is None:
             return 0, total
         half = window_samples // 2
@@ -418,6 +427,7 @@ def sequence_samples_debug(
                 ax_a.set_title("Amplitude vs time")
 
     def _boundary_label(i: int) -> str:
+        """Return a human-friendly label describing boundary `i` for the figure title."""
         if not instances:
             return title
         cur = instances[i]
@@ -445,6 +455,7 @@ def sequence_samples_debug(
             boundary_solid.append(pos)
 
     def _vline_segments(xs: Sequence[float]) -> np.ndarray:
+        """Build axis-coordinate segments for a `LineCollection` vertical line overlay."""
         if not xs:
             return np.zeros((0, 2, 2), dtype=float)
         x = np.asarray(xs, dtype=float)
@@ -482,11 +493,13 @@ def sequence_samples_debug(
     inst_stops = np.array([inst.stop_sample for inst in instances], dtype=int)
 
     def _downsample_step(n: int, *, max_points: int) -> int:
+        """Choose a stride so plotting uses at most `max_points` points."""
         if n <= max_points:
             return 1
         return int(np.ceil(n / max_points))
 
     def _wave_view(ch: int, *, x0w: int, x1w: int) -> tuple[np.ndarray, np.ndarray]:
+        """Return downsampled (x, y) waveform data for channel `ch` over [x0w, x1w)."""
         n = max(0, int(x1w) - int(x0w))
         if n <= 0:
             return np.zeros((0,), dtype=int), np.zeros((0,), dtype=np.int16)
@@ -496,6 +509,7 @@ def sequence_samples_debug(
         return x, y
 
     def _params_at(logical_channel: str, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return (freqs, amps) at global sample indices `x` for one logical channel."""
         if q_ir is None:
             raise RuntimeError("q_ir missing")
         if x.size == 0:
@@ -521,6 +535,7 @@ def sequence_samples_debug(
         return freqs, amps
 
     def _set_view(i: int) -> None:
+        """Set x-limits and selection markers to the boundary at index `i` (slider mode)."""
         i = int(i)
         i = max(0, min(i, len(boundary_positions) - 1))
         pos = boundary_positions[i]
@@ -538,6 +553,7 @@ def sequence_samples_debug(
     updating = False
 
     def _update_from_xlim(_ax=None) -> None:
+        """Update plotted data after pan/zoom (dynamic downsampling for performance)."""
         nonlocal updating
         if updating:
             return

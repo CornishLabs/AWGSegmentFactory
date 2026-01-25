@@ -1,3 +1,9 @@
+"""Resolver: `IntentIR` → `ResolvedIR` (discretize into integer-sample primitives).
+
+This stage turns continuous-time operations (`time_s`) into a segment/part structure
+with integer `n_samples` suitable for later quantization and sample synthesis.
+"""
+
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
 import numpy as np
@@ -20,6 +26,7 @@ from .timeline import LogicalChannelState
 
 
 def _empty_state() -> LogicalChannelState:
+    """Return a logical-channel state with zero tones (used as resolver initial state)."""
     return LogicalChannelState(
         freqs_hz=np.zeros((0,), dtype=float),
         amps=np.zeros((0,), dtype=float),
@@ -28,12 +35,14 @@ def _empty_state() -> LogicalChannelState:
 
 
 def _ceil_samples(sample_rate_hz: float, time_s: float) -> int:
+    """Convert seconds to integer samples by ceiling (never truncates timed ops)."""
     if time_s <= 0:
         return 0
     return int(np.ceil(float(time_s) * float(sample_rate_hz)))
 
 
 def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
+    """Validate and normalize an optional index list into a NumPy index array."""
     if idxs is None:
         return np.arange(n, dtype=int)
     idx = np.array(list(idxs), dtype=int)
@@ -45,6 +54,7 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
 def _hold_parts(
     intent: IntentIR, cur: Dict[str, LogicalChannelState]
 ) -> Dict[str, ResolvedLogicalChannelPart]:
+    """Create per-logical-channel "hold" parts representing the current state."""
     return {
         lc: ResolvedLogicalChannelPart(start=cur[lc], end=cur[lc], interp="hold")
         for lc in intent.logical_channels
@@ -60,6 +70,7 @@ def _append_target_part(
     logical_channel: str,
     target_part: ResolvedLogicalChannelPart,
 ) -> None:
+    """Append one `ResolvedPart` that changes only `logical_channel`, holding the rest."""
     if n_samples <= 0:
         return
     logical_channels = _hold_parts(intent, cur)

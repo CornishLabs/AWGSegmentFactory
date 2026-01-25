@@ -1,3 +1,9 @@
+"""Optional debug/inspection helpers.
+
+These helpers are intentionally separated from the core compiler pipeline and are
+imported lazily so `awgsegmentfactory` can be used without matplotlib/ipywidgets.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -24,6 +30,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def __getattr__(name: str):
+    """Lazy-load debug helpers to avoid importing heavy optional dependencies."""
     if name in {"interactive_grid_debug", "LinearFreqToPos"}:
         from .plot import LinearFreqToPos, interactive_grid_debug
 

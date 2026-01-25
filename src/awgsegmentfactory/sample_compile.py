@@ -1,3 +1,9 @@
+"""Sample synthesis: `QuantizedIR` → `CompiledSequenceProgram`.
+
+This stage synthesizes per-segment, per-channel int16 samples (pattern memory) and
+builds a simple step table (sequence memory) that chains segments in order.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +18,8 @@ from .sequence_compile import QuantizedIR, SegmentQuantizationInfo
 
 @dataclass(frozen=True)
 class CompiledSegment:
+    """One compiled hardware segment: an int16 array per hardware channel."""
+
     name: str
     n_samples: int
     data_i16: np.ndarray  # (n_channels, n_samples)
@@ -19,6 +27,8 @@ class CompiledSegment:
 
 @dataclass(frozen=True)
 class SequenceStep:
+    """One sequence-step entry mapping to Spectrum "step memory" fields."""
+
     step_index: int
     segment_index: int
     next_step: int
@@ -28,6 +38,8 @@ class SequenceStep:
 
 @dataclass(frozen=True)
 class CompiledSequenceProgram:
+    """Final compiler output: segments (pattern memory) plus steps (sequence memory)."""
+
     sample_rate_hz: float
     logical_channel_to_hardware_channel: Dict[str, int]
     gain: float
@@ -117,6 +129,7 @@ def _synth_logical_channel_segment(
     sample_rate_hz: float,
     phase_in: Optional[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Synthesize one logical channel's waveform for a full segment (with optional phase carry)."""
     if not seg.parts:
         return np.zeros((0,), dtype=float), np.zeros((0,), dtype=float)
 

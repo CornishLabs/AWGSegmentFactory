@@ -1,3 +1,5 @@
+"""Performance helpers for timing the builder → samples compilation pipeline."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ from ..sequence_compile import quantize_resolved_ir
 
 @dataclass(frozen=True)
 class PipelineTimings:
+    """Wall-clock timings for each stage of the compilation pipeline."""
+
     build_intent_s: float
     resolve_s: float
     quantize_s: float
@@ -99,6 +103,7 @@ def benchmark_builder_pipeline(
 
 
 def _summarize(values_s: Sequence[float]) -> tuple[float, float, float]:
+    """Return (min, mean, max) for a list of timings in seconds."""
     if not values_s:
         raise ValueError("values_s must be non-empty")
     mn = min(values_s)
@@ -115,6 +120,7 @@ def format_benchmark_table(runs: Sequence[PipelineTimings]) -> str:
         raise ValueError("runs must be non-empty")
 
     def col(get) -> tuple[float, float, float]:
+        """Summarize one timing field across runs as (min, mean, max)."""
         return _summarize([float(get(r)) for r in runs])
 
     rows = [
@@ -126,6 +132,7 @@ def format_benchmark_table(runs: Sequence[PipelineTimings]) -> str:
     ]
 
     def fmt_s(x: float) -> str:
+        """Format seconds for the table (ms for sub-second values)."""
         if x >= 1.0:
             return f"{x:8.3f}s"
         return f"{x*1e3:8.3f}ms"
@@ -134,4 +141,3 @@ def format_benchmark_table(runs: Sequence[PipelineTimings]) -> str:
     for name, (mn, mean, mx) in rows:
         out.append(f"{name:<12} {fmt_s(mn)} {fmt_s(mean)} {fmt_s(mx)}")
     return "\n".join(out)
-

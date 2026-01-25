@@ -1,3 +1,5 @@
+"""High-level plotting helpers for inspecting `ResolvedTimeline` programs."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
@@ -10,14 +12,18 @@ from ..timeline import ResolvedTimeline
 
 @dataclass(frozen=True)
 class LinearFreqToPos:
+    """Simple frequency→position mapping used by debug plots (linear scale/offset)."""
+
     f0_hz: float = 0.0
     slope_hz_per_unit: float = 1e6  # 1 unit per MHz by default
 
     def __call__(self, f_hz: np.ndarray) -> np.ndarray:
+        """Convert frequencies in Hz into position units."""
         return (f_hz - self.f0_hz) / self.slope_hz_per_unit
 
 
 def default_size_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
+    """Default marker size function for NxM grids (geometric mean of H/V amplitudes)."""
     # outer product -> flattened NxM sizes
     A = np.sqrt(np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :])
     return 40.0 * A.reshape(-1)
@@ -73,6 +79,7 @@ def interactive_grid_debug(
     def _axis_limits_for_logical_channel(
         logical_channel: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
     ) -> Tuple[float, float]:
+        """Compute padded axis limits from all span endpoints for a logical channel."""
         spans = tl.logical_channels.get(logical_channel, [])
         if not spans:
             return (-1.0, 1.0)
@@ -103,6 +110,7 @@ def interactive_grid_debug(
     start_names = [_name for (_t0, _name) in tl.segment_starts]
 
     def _segment_name_at(t: float) -> str:
+        """Return the segment name active at time `t` (based on `segment_starts`)."""
         if not start_times:
             return ""
         i = bisect.bisect_right(start_times, t) - 1
@@ -111,6 +119,7 @@ def interactive_grid_debug(
         return start_names[min(i, len(start_names) - 1)]
 
     def render_frame(i: int):
+        """Render frame `i` (a time index) into the matplotlib axes."""
         t = float(times[i])
         sH = tl.state_at(logical_channel_h, t)
         sV = tl.state_at(logical_channel_v, t)
@@ -169,6 +178,7 @@ def interactive_grid_debug(
     widgets.jslink((play, "value"), (slider, "value"))
 
     def on_change(change):
+        """ipywidgets observer: re-render when the slider value changes."""
         if change["name"] == "value":
             with out:
                 render_frame(change["new"])

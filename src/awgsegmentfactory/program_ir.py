@@ -1,3 +1,9 @@
+"""Resolved IR dataclasses (segment/part primitives in integer samples).
+
+`ResolvedIR` is the main compiler input: it groups a program into segments, each
+containing parts with integer `n_samples` and per-logical-channel interpolation specs.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,6 +39,8 @@ class ResolvedPart:
 
 @dataclass(frozen=True)
 class ResolvedSegment:
+    """A resolved segment: a list of integer-sample parts plus sequence metadata."""
+
     name: str
     mode: SegmentMode
     loop: int
@@ -41,6 +49,7 @@ class ResolvedSegment:
 
     @property
     def n_samples(self) -> int:
+        """Total segment length in samples (sum of `parts`)."""
         return sum(p.n_samples for p in self.parts)
 
 
@@ -60,13 +69,16 @@ class ResolvedIR:
 
     @property
     def n_samples(self) -> int:
+        """Total program length in samples (sum of segments)."""
         return sum(s.n_samples for s in self.segments)
 
     @property
     def duration_s(self) -> float:
+        """Total program duration in seconds (based on `sample_rate_hz`)."""
         return self.n_samples / self.sample_rate_hz
 
     def to_timeline(self) -> ResolvedTimeline:
+        """Convert into a debug-friendly `ResolvedTimeline` of per-channel `Span`s."""
         spans: Dict[str, list[Span]] = {lc: [] for lc in self.logical_channels}
         segment_starts: list[tuple[float, str]] = []
 

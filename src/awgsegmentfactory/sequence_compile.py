@@ -1,3 +1,12 @@
+"""Quantization and hardware-constrained transforms for sequence mode.
+
+This stage takes a `ResolvedIR` and applies Spectrum sequence-mode constraints:
+- segment length snapping (minimum sizes, step sizes, optional global quantum)
+- optional wrap-friendly snapping for constant, loopable segments
+
+The result is a `QuantizedIR` (a `ResolvedIR` plus quantization metadata and channel mapping).
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,6 +25,8 @@ from .timeline import LogicalChannelState
 
 @dataclass(frozen=True)
 class SegmentQuantizationInfo:
+    """Per-segment metadata describing how/why its length was quantized."""
+
     name: str
     mode: str
     loop: int
@@ -28,10 +39,12 @@ class SegmentQuantizationInfo:
 
     @property
     def original_s(self) -> float:
+        """Original segment duration in seconds (pre-quantization)."""
         return self.original_samples / self.sample_rate_hz
 
     @property
     def quantized_s(self) -> float:
+        """Quantized segment duration in seconds (post-quantization)."""
         return self.quantized_samples / self.sample_rate_hz
 
 
@@ -45,23 +58,28 @@ class QuantizedIR:
 
     @property
     def sample_rate_hz(self) -> float:
+        """Sample rate in Hz (forwarded from the underlying resolved IR)."""
         return float(self.ir.sample_rate_hz)
 
     @property
     def logical_channels(self) -> tuple[str, ...]:
+        """Ordered logical channel names present in the program."""
         return self.ir.logical_channels
 
     @property
     def segments(self) -> tuple[ResolvedSegment, ...]:
+        """Quantized resolved segments (pattern-memory candidates)."""
         return self.ir.segments
 
     def to_timeline(self):
+        """Convenience: forward to `ResolvedIR.to_timeline()` for debug plotting."""
         return self.ir.to_timeline()
 
 
 def format_samples_time(
     n_samples: int, sample_rate_hz: float, *, unit: str = "us"
 ) -> str:
+    """Format a duration as `N (X unit)` for post-quantization user display."""
     if unit == "us":
         scale = 1e6
         suffix = "µs"
@@ -78,6 +96,7 @@ def format_samples_time(
 
 
 def _ceil_to_multiple(n: int, m: int) -> int:
+    """Ceil `n` up to the next multiple of `m` (return 0 for n<=0)."""
     if m <= 0:
         raise ValueError("m must be > 0")
     if n <= 0:
@@ -86,6 +105,7 @@ def _ceil_to_multiple(n: int, m: int) -> int:
 
 
 def _round_to_multiple(n: int, m: int) -> int:
+    """Round `n` to the nearest multiple of `m` (return 0 for n<=0)."""
     if m <= 0:
         raise ValueError("m must be > 0")
     if n <= 0:
@@ -154,6 +174,7 @@ def _segment_is_constant(seg: ResolvedSegment, logical_channel: str) -> bool:
 def _snap_freqs_to_wrap(
     freqs_hz: np.ndarray, *, n_samples: int, sample_rate_hz: float
 ) -> np.ndarray:
+    """Snap frequencies so `freq * segment_len` is an integer (phase-continuous on loop)."""
     if n_samples <= 0:
         return freqs_hz
     seg_len_s = float(n_samples) / float(sample_rate_hz)

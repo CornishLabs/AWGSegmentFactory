@@ -1,3 +1,9 @@
+"""Intent IR dataclasses (continuous-time program specification).
+
+This module defines the "what the user wants" representation produced by the builder.
+It is later resolved into integer-sample primitives by `resolve_intent_ir(...)`.
+"""
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -12,16 +18,22 @@ ToneId = NewType("ToneId", int)
 
 class PositionToFreqCalib(ABC):
     """
-    Calibration interface: convert a requested position delta (e.g. µm) into a
-    frequency delta (Hz) for a given tone and logical channel.
+    Calibration interface for turning a position delta into a frequency delta.
+
+    This is stored on `IntentIR.calibrations` and can be used by higher-level ops
+    (e.g. "move by +dx") before becoming low-level frequency changes.
     """
 
     @abstractmethod
-    def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float: ...
+    def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float:
+        """Return frequency delta in Hz for a requested position delta in µm."""
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
 class IntentDefinition:
+    """Named initial tone-bank state for a logical channel (freq/amp/phase arrays)."""
+
     name: str
     logical_channel: str
     freqs_hz: Tuple[float, ...]
@@ -31,6 +43,8 @@ class IntentDefinition:
 
 @dataclass(frozen=True)
 class IntentSegment:
+    """One user-defined segment: a sequence of ops plus sequencing metadata."""
+
     name: str
     mode: SegmentMode
     loop: int  # for loop_n/once. For wait_trig set loop=1.
@@ -42,23 +56,31 @@ class IntentSegment:
 
 
 class Op:
+    """Base class for intent operations inside an `IntentSegment`."""
+
     pass
 
 
 @dataclass(frozen=True)
 class HoldOp(Op):
+    """Hold the current state for `time_s` seconds (no parameter changes)."""
+
     time_s: float
     warn_df_hz: Optional[float] = None  # only meaningful in wait_trig segments
 
 
 @dataclass(frozen=True)
 class UseDefOp(Op):
+    """Reset a logical channel's tone-bank state to a named `IntentDefinition`."""
+
     logical_channel: str
     def_name: str
 
 
 @dataclass(frozen=True)
 class MoveOp(Op):
+    """Add `df_hz` to selected tone frequencies over `time_s` using `kind` interpolation."""
+
     logical_channel: str
     df_hz: float
     time_s: float
@@ -68,6 +90,8 @@ class MoveOp(Op):
 
 @dataclass(frozen=True)
 class RampAmpToOp(Op):
+    """Ramp amplitudes to a target value(s) over `time_s` using `kind` interpolation."""
+
     logical_channel: str
     amps_target: float | Tuple[float, ...]
     time_s: float

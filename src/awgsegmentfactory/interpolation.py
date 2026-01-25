@@ -1,3 +1,5 @@
+"""Interpolation primitives shared by timeline debug and sample synthesis."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -51,4 +53,3 @@ def interp_param(
         uu = u
 
     return start + (end - start) * uu
-

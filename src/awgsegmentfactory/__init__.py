@@ -1,3 +1,10 @@
+"""AWG sequence-mode program builder and compiler.
+
+This package implements a small pipeline:
+`AWGProgramBuilder` (intent) → `ResolvedIR` (integer-sample primitives) →
+`QuantizedIR` (hardware-friendly segments) → `CompiledSequenceProgram` (int16 samples + step table).
+"""
+
 from .builder import AWGProgramBuilder
 from .calibration import LinearPositionToFreqCalib
 from .ir import IntentIR
