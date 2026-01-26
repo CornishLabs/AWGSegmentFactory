@@ -87,7 +87,7 @@ class TestBuilder(unittest.TestCase):
             .segment("wait", mode="wait_trig")
             .tones("H")
             .use_def("dH")
-            .hold(time=hold_s, warn_df=0.1)
+            .hold(time=hold_s)
         )
 
         ir = b.build_resolved_ir(sample_rate_hz=fs)
@@ -123,7 +123,7 @@ class TestBuilder(unittest.TestCase):
             .segment("hold", mode="once")
             .tones("H")
             .use_def("dH")
-            .hold(time=0.25, warn_df=0.1)
+            .hold(time=0.25)
         )
         ir = b.build_resolved_ir(sample_rate_hz=fs)
         f = ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]

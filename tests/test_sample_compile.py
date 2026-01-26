@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from awgsegmentfactory.intent_ir import InterpSpec
 from awgsegmentfactory.resolved_ir import (
     ResolvedIR,
     ResolvedLogicalChannelPart,
@@ -43,10 +44,18 @@ class TestSampleCompile(unittest.TestCase):
                 ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": ResolvedLogicalChannelPart(start=st, end=st, interp="hold"),
-                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(
+                            start=st, end=st, interp=InterpSpec("hold")
+                        ),
+                        "V": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "A": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "B": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
                     },
                 ),
             ),
@@ -134,10 +143,18 @@ class TestSampleCompile(unittest.TestCase):
                 ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": ResolvedLogicalChannelPart(start=st2, end=st2, interp="hold"),
-                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(
+                            start=st2, end=st2, interp=InterpSpec("hold")
+                        ),
+                        "V": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "A": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "B": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
                     },
                 ),
             ),
@@ -151,10 +168,18 @@ class TestSampleCompile(unittest.TestCase):
                 ResolvedPart(
                     n_samples=n,
                     logical_channels={
-                        "H": ResolvedLogicalChannelPart(start=st1, end=st1, interp="hold"),
-                        "V": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "A": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
-                        "B": ResolvedLogicalChannelPart(start=empty, end=empty, interp="hold"),
+                        "H": ResolvedLogicalChannelPart(
+                            start=st1, end=st1, interp=InterpSpec("hold")
+                        ),
+                        "V": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "A": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "B": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
                     },
                 ),
             ),

@@ -133,7 +133,6 @@ This IR is then (later) compiled into raw AWG samples / segments for Spectrum `s
 * For `mode="wait_trig"` segments: user supplies `hold(time=...)`.
 * During resolving/compiling: frequencies are **snapped/rounded** to the nearest values that make the waveform wrap-continuously for that hold length (quantisation grid depends on `sample_rate` and segment length in samples).
 * We default to rounding; no extra modes exposed yet.
-* `warn_df` lets you warn if snapping delta exceeds some threshold.
 
 ### 4) Unified tone operations
 

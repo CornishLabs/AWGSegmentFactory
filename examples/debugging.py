@@ -51,7 +51,7 @@ prog = (
     .use_def("loading_H")
     .tones("V")
     .use_def("loading_V")
-    .hold(time=1, warn_df=50e3)
+    .hold(time=1)
     .segment("hotswap_rearrange_to_exp_array", mode="loop_n", loop=1)
     .tones("H")
     .remap_from_def(

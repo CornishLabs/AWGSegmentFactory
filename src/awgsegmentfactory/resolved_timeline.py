@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 import numpy as np
 
-from .intent_ir import InterpKind
+from .intent_ir import InterpSpec
 from .interpolation import interp_param
 
 
@@ -30,8 +30,7 @@ class Span:
     t1: float
     start: LogicalChannelState
     end: LogicalChannelState
-    interp: InterpKind
-    tau_s: Optional[float] = None
+    interp: InterpSpec
     seg_name: Optional[str] = None
 
     def duration(self) -> float:
@@ -53,13 +52,13 @@ class Span:
         a0, a1 = self.start.amps, self.end.amps
         p0, p1 = self.start.phases_rad, self.end.phases_rad
 
-        if self.interp == "hold":
+        if self.interp.kind == "hold":
             return self.start
 
         x = t - self.t0
-        freqs = interp_param(f0, f1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
-        amps = interp_param(a0, a1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
-        phases = interp_param(p0, p1, kind=self.interp, u=u, t_s=x, tau_s=self.tau_s)
+        freqs = interp_param(f0, f1, interp=self.interp, u=u, t_s=x)
+        amps = interp_param(a0, a1, interp=self.interp, u=u, t_s=x)
+        phases = interp_param(p0, p1, interp=self.interp, u=u, t_s=x)
         return LogicalChannelState(freqs, amps, phases)
 
 

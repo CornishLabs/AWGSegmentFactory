@@ -7,9 +7,9 @@ containing parts with integer `n_samples` and per-logical-channel interpolation 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
-from .intent_ir import InterpKind, SegmentMode, SegmentPhaseMode
+from .intent_ir import InterpSpec, SegmentMode, SegmentPhaseMode
 from .resolved_timeline import LogicalChannelState, ResolvedTimeline, Span
 
 
@@ -19,8 +19,7 @@ class ResolvedLogicalChannelPart:
 
     start: LogicalChannelState
     end: LogicalChannelState
-    interp: InterpKind
-    tau_s: Optional[float] = None
+    interp: InterpSpec
 
 
 @dataclass(frozen=True)
@@ -30,7 +29,7 @@ class ResolvedPart:
 
     The compiler-friendly representation is:
     - duration is stored as `n_samples` (integer)
-    - each logical channel has (start, end, interp, tau) describing parameter evolution
+    - each logical channel has (start, end, interp) describing parameter evolution
     """
 
     n_samples: int
@@ -100,7 +99,6 @@ class ResolvedIR:
                             start=pp.start,
                             end=pp.end,
                             interp=pp.interp,
-                            tau_s=pp.tau_s,
                             seg_name=seg.name,
                         )
                     )

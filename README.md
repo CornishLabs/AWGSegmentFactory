@@ -146,5 +146,4 @@ Interpretation of the quantized IR to produce samples is done by `compile_sequen
 ## Notes / current limitations
 
 - `phases="auto"` is currently a placeholder (phases default to 0).
-- `warn_df` is recorded on `hold()` but not currently used to emit warnings during snapping.
 - Calibration objects are stored on `IntentIR.calibrations` but not yet consumed by ops.

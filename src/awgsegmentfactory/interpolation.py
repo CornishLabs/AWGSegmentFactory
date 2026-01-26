@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-from .intent_ir import InterpKind
+from .intent_ir import InterpSpec
 
 
 def smoothstep_min_jerk(u: float | np.ndarray) -> float | np.ndarray:
@@ -18,17 +18,15 @@ def interp_param(
     start: np.ndarray,
     end: np.ndarray,
     *,
-    kind: InterpKind,
+    interp: InterpSpec,
     u: float | np.ndarray,
     t_s: Optional[float | np.ndarray] = None,
-    tau_s: Optional[float] = None,
 ) -> np.ndarray:
     """
     Interpolate a parameter array from `start` -> `end`.
 
     - For `linear`/`min_jerk`, interpolation is controlled by `u` in [0, 1).
-    - For `exp`, interpolation is controlled by elapsed time `t_s` (seconds) and `tau_s`.
-      If `tau_s` is missing/invalid, falls back to linear interpolation using `u`.
+    - For `exp`, interpolation is controlled by elapsed time `t_s` (seconds) and `interp.tau_s`.
 
     Shapes:
     - `start` and `end` must have the same shape.
@@ -37,13 +35,16 @@ def interp_param(
     if start.shape != end.shape:
         raise ValueError("Start/end shape mismatch")
 
+    kind = interp.kind
     if kind == "hold":
         return start
 
     if kind == "exp":
-        if t_s is None or tau_s is None or tau_s <= 0:
-            return start + (end - start) * u
-        k = np.exp(-np.asarray(t_s, dtype=float) / float(tau_s))
+        if t_s is None:
+            raise ValueError("exp interpolation requires t_s")
+        if interp.tau_s is None:  # pragma: no cover
+            raise ValueError("exp interpolation requires interp.tau_s")
+        k = np.exp(-np.asarray(t_s, dtype=float) / float(interp.tau_s))
         return end + (start - end) * k
 
     uu: float | np.ndarray

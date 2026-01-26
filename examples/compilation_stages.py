@@ -43,7 +43,9 @@ def _describe_ir(ir) -> None:
             f"- segment {seg.name!r}: mode={seg.mode} loop={seg.loop} samples={seg.n_samples}"
         )
         for i, part in enumerate(seg.parts):
-            kinds = {lc: part.logical_channels[lc].interp for lc in ir.logical_channels}
+            kinds = {
+                lc: part.logical_channels[lc].interp.kind for lc in ir.logical_channels
+            }
             print(f"  part {i}: n_samples={part.n_samples} kinds={kinds}")
 
 
@@ -73,7 +75,7 @@ def _logical_channel_part_to_arrays(
     a0, a1 = pp.start.amps, pp.end.amps
     p0, p1 = pp.start.phases_rad, pp.end.phases_rad
 
-    if pp.interp == "hold":
+    if pp.interp.kind == "hold":
         freqs = np.repeat(f0[None, :], n_samples, axis=0)
         amps = np.repeat(a0[None, :], n_samples, axis=0)
         phases = np.repeat(p0[None, :], n_samples, axis=0)
@@ -83,9 +85,9 @@ def _logical_channel_part_to_arrays(
     u = np.linspace(0.0, 1.0, n_samples, endpoint=False, dtype=float)[:, None]
     t_rel = t[:, None]
 
-    freqs = interp_param(f0, f1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
-    amps = interp_param(a0, a1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
-    phases = interp_param(p0, p1, kind=pp.interp, u=u, t_s=t_rel, tau_s=pp.tau_s)
+    freqs = interp_param(f0, f1, interp=pp.interp, u=u, t_s=t_rel)
+    amps = interp_param(a0, a1, interp=pp.interp, u=u, t_s=t_rel)
+    phases = interp_param(p0, p1, interp=pp.interp, u=u, t_s=t_rel)
     return freqs, amps, phases
 
 
@@ -125,7 +127,7 @@ def main() -> None:
     b.segment("sync", mode="wait_trig")
     b.tones("H").use_def("init_H")
     b.tones("V").use_def("init_V")
-    b.hold(time=0.25, warn_df=0.01)  # 0.25s -> ceil(2.5)=3 samples -> dt=0.3s snap grid
+    b.hold(time=0.25)  # 0.25s -> ceil(2.5)=3 samples -> dt=0.3s snap grid
 
     b.segment("move_H", mode="once")
     b.tones("H").move(df=+1.0, time=0.3)  # 0.3s -> 3 samples

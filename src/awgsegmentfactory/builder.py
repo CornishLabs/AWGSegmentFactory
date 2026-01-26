@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from .intent_ir import (
     IntentIR,
     IntentSegment,
+    InterpKind,
+    InterpSpec,
     SegmentMode,
     SegmentPhaseMode,
     IntentDefinition,
@@ -57,9 +59,11 @@ class LogicalChannelView:
         df: float,
         time: float,
         idxs: Optional[Sequence[int]] = None,
-        kind: str = "linear",
+        kind: InterpKind = "linear",
     ) -> "LogicalChannelView":
         """Append a `MoveOp` (frequency delta over time) for this logical channel."""
+        if kind not in ("linear", "min_jerk"):
+            raise ValueError("move: kind must be 'linear' or 'min_jerk'")
         idx_t = tuple(int(i) for i in idxs) if idxs is not None else None
         self._b._append(
             MoveOp(
@@ -67,9 +71,9 @@ class LogicalChannelView:
                 df_hz=float(df),
                 time_s=float(time),
                 idxs=idx_t,
-                kind=kind,
+                interp=InterpSpec(kind),
             )
-        )  # type: ignore[arg-type]
+        )
         return self
 
     def ramp_amp_to(
@@ -77,11 +81,21 @@ class LogicalChannelView:
         *,
         amps: float | Sequence[float],
         time: float,
-        kind: str = "linear",
+        kind: InterpKind = "linear",
         tau: Optional[float] = None,
         idxs: Optional[Sequence[int]] = None,
     ) -> "LogicalChannelView":
         """Append a `RampAmpToOp` (amplitude ramp over time) for this logical channel."""
+        if kind not in ("linear", "exp"):
+            raise ValueError("ramp_amp_to: kind must be 'linear' or 'exp'")
+        if kind == "exp":
+            if tau is None:
+                raise ValueError("ramp_amp_to: kind='exp' requires tau=...")
+            interp = InterpSpec(kind, tau_s=float(tau))
+        else:
+            if tau is not None:
+                raise ValueError("ramp_amp_to: tau is only valid for kind='exp'")
+            interp = InterpSpec(kind)
         idx_t = tuple(int(i) for i in idxs) if idxs is not None else None
         amps_t = (
             amps if isinstance(amps, (int, float)) else tuple(float(a) for a in amps)
@@ -91,8 +105,7 @@ class LogicalChannelView:
                 logical_channel=self._logical_channel,
                 amps_target=amps_t,  # type: ignore[arg-type]
                 time_s=float(time),
-                kind=kind,  # type: ignore[arg-type]
-                tau_s=float(tau) if tau is not None else None,
+                interp=interp,
                 idxs=idx_t,
             )
         )
@@ -105,9 +118,11 @@ class LogicalChannelView:
         src: Sequence[int],
         dst: str | Sequence[int] = "all",
         time: float,
-        kind: str = "min_jerk",
+        kind: InterpKind = "min_jerk",
     ) -> "LogicalChannelView":
         """Append a `RemapFromDefOp` to retarget/select tones against a definition."""
+        if kind not in ("linear", "min_jerk"):
+            raise ValueError("remap_from_def: kind must be 'linear' or 'min_jerk'")
         src_t = tuple(int(i) for i in src)
 
         # dst="all" expands to 0..len(target_def)-1 (resolved here by looking up the definition).
@@ -124,7 +139,7 @@ class LogicalChannelView:
                 src=src_t,
                 dst=dst_t,
                 time_s=float(time),
-                kind=kind,  # type: ignore[arg-type]
+                interp=InterpSpec(kind),
             )
         )
         return self
@@ -145,11 +160,9 @@ class LogicalChannelView:
         """Start a new segment and return the builder for further chaining."""
         return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
 
-    def hold(
-        self, *, time: float, warn_df: Optional[float] = None
-    ) -> "AWGProgramBuilder":
+    def hold(self, *, time: float) -> "AWGProgramBuilder":
         """Append a `HoldOp` (hold all logical channels for a duration)."""
-        return self._b.hold(time=time, warn_df=warn_df)
+        return self._b.hold(time=time)
 
     def build(self):
         """Disallow `.build()` to avoid ambiguity; use `build_*` methods instead."""
@@ -283,16 +296,13 @@ class AWGProgramBuilder:
             raise RuntimeError("Call .segment(...) before .tones(...)")
         return LogicalChannelView(self, logical_channel)
 
-    def hold(
-        self, *, time: float, warn_df: Optional[float] = None
-    ) -> "AWGProgramBuilder":
+    def hold(self, *, time: float) -> "AWGProgramBuilder":
         """Append a `HoldOp` to the current segment (holds *all* logical channels)."""
         if self._current_seg is None:
             raise RuntimeError("Call .segment(...) before .hold(...)")
         self._append(
             HoldOp(
                 time_s=float(time),
-                warn_df_hz=float(warn_df) if warn_df is not None else None,
             )
         )
         return self

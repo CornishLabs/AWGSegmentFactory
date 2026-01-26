@@ -10,6 +10,7 @@ import numpy as np
 
 from .intent_ir import (
     IntentIR,
+    InterpSpec,
     HoldOp,
     UseDefOp,
     MoveOp,
@@ -56,7 +57,7 @@ def _hold_parts(
 ) -> Dict[str, ResolvedLogicalChannelPart]:
     """Create per-logical-channel "hold" parts representing the current state."""
     return {
-        lc: ResolvedLogicalChannelPart(start=cur[lc], end=cur[lc], interp="hold")
+        lc: ResolvedLogicalChannelPart(start=cur[lc], end=cur[lc], interp=InterpSpec("hold"))
         for lc in intent.logical_channels
     }
 
@@ -154,7 +155,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         target_part=ResolvedLogicalChannelPart(
                             start=LogicalChannelState(sf, sa, sp),
                             end=end,
-                            interp=op.kind,
+                            interp=op.interp,
                         ),
                     )
                     seg_samples += n
@@ -184,7 +185,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         n_samples=n,
                         logical_channel=op.logical_channel,
                         target_part=ResolvedLogicalChannelPart(
-                            start=start, end=end, interp=op.kind
+                            start=start, end=end, interp=op.interp
                         ),
                     )
                     seg_samples += n
@@ -226,8 +227,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         target_part=ResolvedLogicalChannelPart(
                             start=start,
                             end=end,
-                            interp=op.kind,
-                            tau_s=op.tau_s,
+                            interp=op.interp,
                         ),
                     )
                     seg_samples += n

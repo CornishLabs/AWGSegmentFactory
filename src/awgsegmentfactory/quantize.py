@@ -22,6 +22,7 @@ from .resolved_ir import (
 )
 from .resolved_timeline import LogicalChannelState
 from .types import ChannelMap
+from .intent_ir import InterpSpec
 
 
 @dataclass(frozen=True)
@@ -152,7 +153,7 @@ def _segment_is_constant(seg: ResolvedSegment, logical_channel: str) -> bool:
     ref: Optional[LogicalChannelState] = None
     for part in seg.parts:
         pp = part.logical_channels[logical_channel]
-        if pp.interp != "hold":
+        if pp.interp.kind != "hold":
             return False
         if not np.array_equal(pp.start.freqs_hz, pp.end.freqs_hz):
             return False
@@ -261,7 +262,7 @@ def quantize_resolved_ir(
                 lc: ResolvedLogicalChannelPart(
                     start=parts[-1].logical_channels[lc].end,
                     end=parts[-1].logical_channels[lc].end,
-                    interp="hold",
+                    interp=InterpSpec("hold"),
                 )
                 for lc in ir.logical_channels
             }
@@ -307,7 +308,7 @@ def quantize_resolved_ir(
                         snapped, pp.start.amps.copy(), pp.start.phases_rad.copy()
                     )
                     new_logical_channels[lc] = ResolvedLogicalChannelPart(
-                        start=st, end=st, interp="hold"
+                        start=st, end=st, interp=InterpSpec("hold")
                     )
                 new_parts.append(
                     ResolvedPart(

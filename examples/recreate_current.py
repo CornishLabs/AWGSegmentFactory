@@ -39,8 +39,8 @@ ir = (
     .tones("V")
     .use_def("loading_V")
     .hold(
-        time=200e-6, warn_df=50e3
-    )  # warn_df is max |snapping delta| threshold, SI units
+        time=200e-6
+    )
     # 3) Rearrange (hotswappable): only H changes (V implicitly unchanged)
     #
     # This is *not* a “move(df=...)” — it’s a remapping/re-targeting operation:
@@ -114,8 +114,8 @@ for seg in ir.segments:
     for i, part in enumerate(seg.parts):
         lc_H = part.logical_channels.get("H")
         lc_V = part.logical_channels.get("V")
-        h_desc = f"H:{lc_H.interp}" if lc_H is not None else "H:—"
-        v_desc = f"V:{lc_V.interp}" if lc_V is not None else "V:—"
+        h_desc = f"H:{lc_H.interp.kind}" if lc_H is not None else "H:—"
+        v_desc = f"V:{lc_V.interp.kind}" if lc_V is not None else "V:—"
         print(
             f"part {i}: n={part.n_samples} ({part.n_samples / ir.sample_rate_hz * 1e6:.2f} µs) {h_desc} {v_desc}"
         )

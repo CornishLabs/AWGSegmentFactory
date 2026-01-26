@@ -73,7 +73,7 @@ def _interp_logical_channel_part(
         z = np.zeros((n_samples, 0), dtype=float)
         return z, z
 
-    if pp.interp == "hold":
+    if pp.interp.kind == "hold":
         freqs = np.repeat(f0[None, :], n_samples, axis=0)
         amps = np.repeat(a0[None, :], n_samples, axis=0)
         return freqs, amps
@@ -81,10 +81,10 @@ def _interp_logical_channel_part(
     u = (np.arange(n_samples, dtype=float) / float(n_samples))[:, None]  # [0,1)
     t = (np.arange(n_samples, dtype=float) / float(sample_rate_hz))[:, None]
     freqs = interp_param(
-        f0, f1, kind=pp.interp, u=u, t_s=t, tau_s=pp.tau_s
+        f0, f1, interp=pp.interp, u=u, t_s=t
     )
     amps = interp_param(
-        a0, a1, kind=pp.interp, u=u, t_s=t, tau_s=pp.tau_s
+        a0, a1, interp=pp.interp, u=u, t_s=t
     )
     return freqs, amps
 

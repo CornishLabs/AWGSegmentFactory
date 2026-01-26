@@ -7,7 +7,7 @@ It is later resolved into integer-sample primitives by `resolve_intent_ir(...)`.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, NewType, Optional, Tuple, Literal
 
 SegmentMode = Literal["loop_n", "wait_trig"]
@@ -15,6 +15,25 @@ InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
 SegmentPhaseMode = Literal["carry", "fixed"]
 
 ToneId = NewType("ToneId", int)
+
+@dataclass(frozen=True)
+class InterpSpec:
+    """Interpolation spec (kind + kind-specific parameters).
+
+    This avoids scattering optional interpolation parameters (like `tau_s` for `"exp"`)
+    across multiple ops/IR layers.
+    """
+
+    kind: InterpKind
+    tau_s: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "exp":
+            if self.tau_s is None or float(self.tau_s) <= 0:
+                raise ValueError("InterpSpec(kind='exp') requires tau_s > 0")
+        else:
+            if self.tau_s is not None:
+                raise ValueError("tau_s is only valid for kind='exp'")
 
 
 class PositionToFreqCalib(ABC):
@@ -67,7 +86,6 @@ class HoldOp(Op):
     """Hold the current state for `time_s` seconds (no parameter changes)."""
 
     time_s: float
-    warn_df_hz: Optional[float] = None  # only meaningful in wait_trig segments
 
 
 @dataclass(frozen=True)
@@ -80,24 +98,23 @@ class UseDefOp(Op):
 
 @dataclass(frozen=True)
 class MoveOp(Op):
-    """Add `df_hz` to selected tone frequencies over `time_s` using `kind` interpolation."""
+    """Add `df_hz` to selected tone frequencies over `time_s` using `interp`."""
 
     logical_channel: str
     df_hz: float
     time_s: float
     idxs: Optional[Tuple[int, ...]] = None
-    kind: InterpKind = "linear"  # "linear" or "min_jerk" etc
+    interp: InterpSpec = field(default_factory=lambda: InterpSpec("linear"))
 
 
 @dataclass(frozen=True)
 class RampAmpToOp(Op):
-    """Ramp amplitudes to a target value(s) over `time_s` using `kind` interpolation."""
+    """Ramp amplitudes to a target value(s) over `time_s` using `interp`."""
 
     logical_channel: str
     amps_target: float | Tuple[float, ...]
     time_s: float
-    kind: InterpKind = "linear"  # "linear" or "exp"
-    tau_s: Optional[float] = None
+    interp: InterpSpec = field(default_factory=lambda: InterpSpec("linear"))
     idxs: Optional[Tuple[int, ...]] = None
 
 
@@ -114,7 +131,7 @@ class RemapFromDefOp(Op):
     src: Tuple[int, ...]
     dst: Tuple[int, ...]  # explicit indices into target definition
     time_s: float
-    kind: InterpKind = "min_jerk"
+    interp: InterpSpec = field(default_factory=lambda: InterpSpec("min_jerk"))
 
 
 @dataclass(frozen=True)
