@@ -5,6 +5,7 @@ import numpy as np
 from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.intent_ir import HoldOp, RemapFromDefOp, UseDefOp
 from awgsegmentfactory.quantize import quantize_resolved_ir
+from awgsegmentfactory.synth_samples import compile_sequence_program
 
 
 class TestBuilder(unittest.TestCase):
@@ -136,3 +137,48 @@ class TestBuilder(unittest.TestCase):
         b.tones("H").use_def("dH").move(df=1.0, time=0.0)
         with self.assertRaises(ValueError):
             b.build_resolved_ir(sample_rate_hz=10.0)
+
+    def test_add_and_remove_tones(self) -> None:
+        fs = 1000.0
+        b = (
+            AWGProgramBuilder()
+            .logical_channel("H")
+            .logical_channel("V")
+            .logical_channel("A")
+            .logical_channel("B")
+            .define("v0", logical_channel="V", freqs=[100.0], amps=[0.0], phases="auto")
+            .segment("s0", mode="once")
+            .tones("V")
+            .use_def("v0")
+            .hold(time=0.1)
+            .segment("s_add", mode="once", phase_mode="fixed")
+            .tones("V")
+            .add_tone(f=200.0)
+            .ramp_amp_to(amps=1.0, idxs=[1], time=0.1)
+            .segment("s_remove", mode="once", phase_mode="fixed")
+            .tones("V")
+            .remove_tones(idxs=[1])
+            .hold(time=0.1)
+        )
+
+        ir = b.build_resolved_ir(sample_rate_hz=fs)
+        seg_add = next(s for s in ir.segments if s.name == "s_add")
+        self.assertEqual(seg_add.phase_mode, "fixed")
+        self.assertEqual(len(seg_add.parts), 1)
+        v_part = seg_add.parts[0].logical_channels["V"]
+        self.assertEqual(v_part.start.freqs_hz.shape, (2,))
+        np.testing.assert_allclose(v_part.start.freqs_hz, [100.0, 200.0])
+        self.assertEqual(v_part.end.amps.shape, (2,))
+        self.assertAlmostEqual(float(v_part.end.amps[1]), 1.0, places=12)
+
+        quantized = quantize_resolved_ir(
+            ir,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        prog = compile_sequence_program(
+            quantized,
+            gain=1.0,
+            clip=1.0,
+            full_scale=20000,
+        )
+        self.assertGreater(len(prog.segments), 0)

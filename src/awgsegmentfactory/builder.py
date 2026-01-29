@@ -17,6 +17,8 @@ from .intent_ir import (
     IntentDefinition,
     HoldOp,
     UseDefOp,
+    AddToneOp,
+    RemoveTonesOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
@@ -53,6 +55,41 @@ class LogicalChannelView:
         )
         return self
 
+    def add_tone(
+        self,
+        *,
+        f: float,
+        amp: float = 0.0,
+        phase: float | Literal["auto"] = "auto",
+        at: Optional[int] = None,
+    ) -> "LogicalChannelView":
+        """Append an `AddToneOp` (instantaneous tone-bank edit) for this logical channel."""
+        ph = 0.0 if phase == "auto" else float(phase)
+        self._b._append(
+            AddToneOp(
+                logical_channel=self._logical_channel,
+                freqs_hz=(float(f),),
+                amps=(float(amp),),
+                phases_rad=(ph,),
+                at=int(at) if at is not None else None,
+            )
+        )
+        return self
+
+    def remove_tones(self, *, idxs: Sequence[int]) -> "LogicalChannelView":
+        """Append a `RemoveTonesOp` (instantaneous tone-bank edit) for this logical channel."""
+        idx_t = tuple(int(i) for i in idxs)
+        if not idx_t:
+            raise ValueError("remove_tones: idxs must be non-empty")
+        self._b._append(
+            RemoveTonesOp(logical_channel=self._logical_channel, idxs=idx_t)
+        )
+        return self
+
+    def remove_tone(self, *, idx: int) -> "LogicalChannelView":
+        """Convenience: remove a single tone by index."""
+        return self.remove_tones(idxs=[int(idx)])
+
     def move(
         self,
         *,
@@ -86,8 +123,11 @@ class LogicalChannelView:
         idxs: Optional[Sequence[int]] = None,
     ) -> "LogicalChannelView":
         """Append a `RampAmpToOp` (amplitude ramp over time) for this logical channel."""
-        if kind not in ("linear", "exp"):
-            raise ValueError("ramp_amp_to: kind must be 'linear' or 'exp'")
+        if kind not in ("linear", "exp", "min_jerk", "geo_ramp", "adiabatic_ramp"):
+            raise ValueError(
+                "ramp_amp_to: kind must be one of "
+                "'linear', 'exp', 'min_jerk', 'geo_ramp', 'adiabatic_ramp'"
+            )
         if kind == "exp":
             if tau is None:
                 raise ValueError("ramp_amp_to: kind='exp' requires tau=...")

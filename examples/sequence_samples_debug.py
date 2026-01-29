@@ -11,6 +11,9 @@ from awgsegmentfactory import AWGProgramBuilder, ResolvedIR
 from awgsegmentfactory.debug import sequence_samples_debug
 
 
+from sequence_repo import recreate_mol_exp
+
+
 def _maybe_enable_matplotlib_widget_backend() -> None:
     try:
         from IPython import get_ipython  # type: ignore
@@ -25,35 +28,7 @@ def _maybe_enable_matplotlib_widget_backend() -> None:
 def _build_demo_program(
     *, sample_rate_hz: float
 ) -> ResolvedIR:
-    b = (
-        AWGProgramBuilder()
-        .logical_channel("H")
-        .logical_channel("V")
-        .define("init_H", logical_channel="H", freqs=[1e5], amps=[0.3], phases="auto")
-        .define("init_V", logical_channel="V", freqs=[2e5], amps=[0.3], phases="auto")
-    )
-
-    # 0) Wait for trigger, output stable tones (this segment loops until a trigger event)
-    b.segment("wait_start", mode="wait_trig")
-    b.tones("H").use_def("init_H")
-    b.tones("V").use_def("init_V")
-    b.hold(time=40e-6)
-
-    b.segment("ramp_down", mode="once")
-    b.tones("V").ramp_amp_to(
-        amps=[0.1],
-        time=50e-6,
-        kind="exp",
-        tau=20e-6,
-    )
-
-    # 1) A short chirp on H (one-shot segment)
-    b.segment("chirp_H", mode="once")
-    b.tones("H").move(df=+1e5, time=100e-6, idxs=[0], kind="linear")
-
-
-    b.segment("wait_start_2", mode="wait_trig")
-    b.hold(time=40e-6)
+    b = recreate_mol_exp()
 
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 

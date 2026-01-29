@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 import bisect
 
+
 import numpy as np
 
 from ..resolved_timeline import ResolvedTimeline
@@ -22,11 +23,15 @@ class LinearFreqToPos:
         return (f_hz - self.f0_hz) / self.slope_hz_per_unit
 
 
+def norm_total_amp_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
+    A = np.sqrt(np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :])
+    return A.reshape(-1)
+
 def default_size_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
     """Default marker size function for NxM grids (geometric mean of H/V amplitudes)."""
     # outer product -> flattened NxM sizes
-    A = np.sqrt(np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :])
-    return 40.0 * A.reshape(-1)
+    A = norm_total_amp_fn(aH, aV)
+    return 60.0 * A
 
 
 def interactive_grid_debug(
@@ -48,6 +53,7 @@ def interactive_grid_debug(
     """
     try:
         import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
             "`interactive_grid_debug` requires matplotlib (and ipywidgets). Install the `dev` dependency group."
@@ -131,6 +137,7 @@ def interactive_grid_debug(
         X = np.repeat(xH, len(yV))
         Y = np.tile(yV, len(xH))
         S = size_fn(sH.amps, sV.amps)
+        Alpha = norm_total_amp_fn(sH.amps, sV.amps)
 
         ax.clear()
         if show_segment_in_title:
@@ -141,7 +148,13 @@ def interactive_grid_debug(
         ax.set_xlabel(f"{logical_channel_h} position (arb)")
         ax.set_ylabel(f"{logical_channel_v} position (arb)")
         ax.grid(True)
-        ax.scatter(X, Y, s=S, marker="o")
+        
+        c='blue'
+        rgba = mcolors.to_rgba_array(c)          # shape (N, 4) if c is N colors, or (1, 4) if single
+        rgba = np.broadcast_to(rgba, (len(Alpha), 4)).copy()
+        rgba[:, 3] = Alpha        
+
+        ax.scatter(X, Y, s=S, marker="o", linewidth=0, edgecolor='none', color=rgba)
 
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)

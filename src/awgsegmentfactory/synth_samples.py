@@ -140,14 +140,12 @@ def _synth_logical_channel_segment(
     if seg.phase_mode == "carry":
         if phase_in is None:
             phase = first.start.phases_rad.copy()
-        elif phase_in.shape != (n_tones,):
-            raise ValueError(
-                f"Cannot carry phase into segment {seg.name!r} logical_channel {logical_channel!r}: "
-                f"tone count changed from {phase_in.shape[0]} to {n_tones}. "
-                "Use phase_mode='fixed' for this segment or keep tone counts constant."
-            )
         else:
-            phase = phase_in.copy()
+            # Policy: phases zip by index. Extra current tones start at their declared
+            # start phase (defaults to 0). Extra previous phases are dropped.
+            phase = first.start.phases_rad.copy()
+            n_copy = min(int(phase_in.shape[0]), n_tones)
+            phase[:n_copy] = phase_in[:n_copy]
     else:
         phase = first.start.phases_rad.copy()
 

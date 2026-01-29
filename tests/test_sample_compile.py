@@ -119,20 +119,21 @@ class TestSampleCompile(unittest.TestCase):
         expected = int(np.round(np.sin(phase_end) * full_scale))
         self.assertEqual(int(prog_carry.segments[1].data_i16[0, 0]), expected)
 
-    def test_carry_with_tone_count_change_errors(self) -> None:
+    def test_carry_with_tone_count_change_zips_phases(self) -> None:
         fs = 1000.0
+        f0 = 10.0
         n = 96
         empty = _empty_logical_channel_state()
 
         st2 = LogicalChannelState(
-            freqs_hz=np.array([10.0, 20.0]),
+            freqs_hz=np.array([f0, 20.0]),
             amps=np.array([1.0, 1.0]),
             phases_rad=np.array([0.0, 0.0]),
         )
         st1 = LogicalChannelState(
-            freqs_hz=np.array([10.0]),
+            freqs_hz=np.array([f0]),
             amps=np.array([1.0]),
-            phases_rad=np.array([0.0]),
+            phases_rad=np.array([1.234]),
         )
 
         seg0 = ResolvedSegment(
@@ -160,7 +161,7 @@ class TestSampleCompile(unittest.TestCase):
             ),
             phase_mode="carry",
         )
-        seg1 = ResolvedSegment(
+        seg1_carry = ResolvedSegment(
             name="s1",
             mode="loop_n",
             loop=1,
@@ -185,21 +186,53 @@ class TestSampleCompile(unittest.TestCase):
             ),
             phase_mode="carry",
         )
-
-        ir = ResolvedIR(
-            sample_rate_hz=fs,
-            logical_channels=("H", "V", "A", "B"),
-            segments=(seg0, seg1),
+        seg1_fixed = ResolvedSegment(
+            name="s1",
+            mode="loop_n",
+            loop=1,
+            parts=seg1_carry.parts,
+            phase_mode="fixed",
         )
 
-        with self.assertRaises(ValueError):
-            quantized = quantize_resolved_ir(
-                ir,
-                logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-            )
-            compile_sequence_program(
-                quantized,
-                gain=1.0,
-                clip=1.0,
-                full_scale=20000,
-            )
+        ir_carry = ResolvedIR(
+            sample_rate_hz=fs,
+            logical_channels=("H", "V", "A", "B"),
+            segments=(seg0, seg1_carry),
+        )
+        ir_fixed = ResolvedIR(
+            sample_rate_hz=fs,
+            logical_channels=("H", "V", "A", "B"),
+            segments=(seg0, seg1_fixed),
+        )
+
+        full_scale = 20000
+        q_carry = quantize_resolved_ir(
+            ir_carry,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        q_fixed = quantize_resolved_ir(
+            ir_fixed,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        prog_carry = compile_sequence_program(
+            q_carry,
+            gain=1.0,
+            clip=1.0,
+            full_scale=full_scale,
+        )
+        prog_fixed = compile_sequence_program(
+            q_fixed,
+            gain=1.0,
+            clip=1.0,
+            full_scale=full_scale,
+        )
+
+        # In carry mode with tone-count mismatch, phases zip by index (tone 0 carries).
+        dphi = 2.0 * np.pi * f0 / fs
+        phase_end0 = (0.0 + n * dphi) % (2.0 * np.pi)
+        expected_carry = int(np.round(np.sin(phase_end0) * full_scale))
+        self.assertEqual(int(prog_carry.segments[1].data_i16[0, 0]), expected_carry)
+
+        # In fixed mode, segment 1 uses its own declared start phase.
+        expected_fixed = int(np.round(np.sin(1.234) * full_scale))
+        self.assertEqual(int(prog_fixed.segments[1].data_i16[0, 0]), expected_fixed)

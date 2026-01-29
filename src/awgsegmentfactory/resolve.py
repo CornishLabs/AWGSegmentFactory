@@ -13,6 +13,8 @@ from .intent_ir import (
     InterpSpec,
     HoldOp,
     UseDefOp,
+    AddToneOp,
+    RemoveTonesOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
@@ -79,6 +81,28 @@ def _append_target_part(
     parts.append(ResolvedPart(n_samples=n_samples, logical_channels=logical_channels))
 
 
+def _tone_count_by_logical_channel(part: ResolvedPart) -> dict[str, int]:
+    return {
+        lc: int(pp.start.freqs_hz.shape[0]) for lc, pp in part.logical_channels.items()
+    }
+
+
+def _update_segment_tone_counts(
+    seg_name: str,
+    segment_tone_counts: Optional[dict[str, int]],
+    part: ResolvedPart,
+) -> dict[str, int]:
+    counts = _tone_count_by_logical_channel(part)
+    if segment_tone_counts is None:
+        return counts
+    if counts != segment_tone_counts:
+        raise ValueError(
+            f"Segment '{seg_name}' changes tone counts across timed parts; "
+            "split the tone-count change into a separate segment."
+        )
+    return segment_tone_counts
+
+
 def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
     """
     Resolve an IntentIR into a fully-explicit ResolvedIR (integer-sample primitives).
@@ -101,6 +125,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
     for seg in intent.segments:
         parts: List[ResolvedPart] = []
         seg_samples = 0
+        segment_tone_counts: Optional[dict[str, int]] = None
 
         for op in seg.ops:
             if isinstance(op, UseDefOp):
@@ -115,6 +140,54 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                     freqs_hz=np.array(d.freqs_hz, dtype=float),
                     amps=np.array(d.amps, dtype=float),
                     phases_rad=np.array(d.phases_rad, dtype=float),
+                )
+                continue
+
+            if isinstance(op, AddToneOp):
+                if (
+                    len(op.freqs_hz) != len(op.amps)
+                    or len(op.freqs_hz) != len(op.phases_rad)
+                ):
+                    raise ValueError("add_tone: freqs/amps/phases length mismatch")
+
+                start = cur[op.logical_channel]
+                n0 = int(start.freqs_hz.shape[0])
+
+                at = n0 if op.at is None else int(op.at)
+                if at < 0 or at > n0:
+                    raise IndexError(
+                        f"add_tone: insertion index out of range for n={n0}: at={at}"
+                    )
+
+                f_new = np.array(op.freqs_hz, dtype=float)
+                a_new = np.array(op.amps, dtype=float)
+                p_new = np.array(op.phases_rad, dtype=float)
+
+                cur[op.logical_channel] = LogicalChannelState(
+                    freqs_hz=np.concatenate((start.freqs_hz[:at], f_new, start.freqs_hz[at:])),
+                    amps=np.concatenate((start.amps[:at], a_new, start.amps[at:])),
+                    phases_rad=np.concatenate((start.phases_rad[:at], p_new, start.phases_rad[at:])),
+                )
+                continue
+
+            if isinstance(op, RemoveTonesOp):
+                start = cur[op.logical_channel]
+                n0 = int(start.freqs_hz.shape[0])
+
+                idx = np.array(list(op.idxs), dtype=int)
+                if idx.size == 0:
+                    continue
+                if np.any(idx < 0) or np.any(idx >= n0):
+                    raise IndexError(
+                        f"remove_tones: idxs out of range for n={n0}: {op.idxs}"
+                    )
+
+                mask = np.ones((n0,), dtype=bool)
+                mask[idx] = False
+                cur[op.logical_channel] = LogicalChannelState(
+                    freqs_hz=start.freqs_hz[mask],
+                    amps=start.amps[mask],
+                    phases_rad=start.phases_rad[mask],
                 )
                 continue
 
@@ -158,6 +231,9 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                             interp=op.interp,
                         ),
                     )
+                    segment_tone_counts = _update_segment_tone_counts(
+                        seg.name, segment_tone_counts, parts[-1]
+                    )
                     seg_samples += n
                 cur[op.logical_channel] = end
                 continue
@@ -187,6 +263,9 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         target_part=ResolvedLogicalChannelPart(
                             start=start, end=end, interp=op.interp
                         ),
+                    )
+                    segment_tone_counts = _update_segment_tone_counts(
+                        seg.name, segment_tone_counts, parts[-1]
                     )
                     seg_samples += n
                 cur[op.logical_channel] = end
@@ -230,6 +309,9 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                             interp=op.interp,
                         ),
                     )
+                    segment_tone_counts = _update_segment_tone_counts(
+                        seg.name, segment_tone_counts, parts[-1]
+                    )
                     seg_samples += n
                 cur[op.logical_channel] = end
                 continue
@@ -244,6 +326,9 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                 # Hold applies to all logical channels (continuous timeline)
                 parts.append(
                     ResolvedPart(n_samples=n, logical_channels=_hold_parts(intent, cur))
+                )
+                segment_tone_counts = _update_segment_tone_counts(
+                    seg.name, segment_tone_counts, parts[-1]
                 )
                 seg_samples += n
                 continue

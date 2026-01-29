@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Dict, NewType, Optional, Tuple, Literal
 
 SegmentMode = Literal["loop_n", "wait_trig"]
-InterpKind = Literal["hold", "linear", "exp", "min_jerk"]
+InterpKind = Literal["hold", "linear", "exp", "min_jerk", "geo_ramp", "adiabatic_ramp"]
 SegmentPhaseMode = Literal["carry", "fixed"]
 
 ToneId = NewType("ToneId", int)
@@ -29,8 +29,8 @@ class InterpSpec:
 
     def __post_init__(self) -> None:
         if self.kind == "exp":
-            if self.tau_s is None or float(self.tau_s) <= 0:
-                raise ValueError("InterpSpec(kind='exp') requires tau_s > 0")
+            if self.tau_s is None:
+                raise ValueError("InterpSpec(kind='exp') requires tau_s")
         else:
             if self.tau_s is not None:
                 raise ValueError("tau_s is only valid for kind='exp'")
@@ -94,6 +94,25 @@ class UseDefOp(Op):
 
     logical_channel: str
     def_name: str
+
+
+@dataclass(frozen=True)
+class AddToneOp(Op):
+    """Add one or more tones to a logical channel (instantaneous state update)."""
+
+    logical_channel: str
+    freqs_hz: Tuple[float, ...]
+    amps: Tuple[float, ...]
+    phases_rad: Tuple[float, ...]
+    at: Optional[int] = None  # insertion index (None -> append)
+
+
+@dataclass(frozen=True)
+class RemoveTonesOp(Op):
+    """Remove tones by index from a logical channel (instantaneous state update)."""
+
+    logical_channel: str
+    idxs: Tuple[int, ...]
 
 
 @dataclass(frozen=True)
