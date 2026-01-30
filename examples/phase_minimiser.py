@@ -1,93 +1,163 @@
+"""
+Example: crest-factor phase optimisation for a multitone waveform.
+
+This is useful for AWG/AOD work: reducing the crest factor of the summed RF
+waveform helps avoid amplifier saturation and reduces intermodulation artefacts.
+
+The implementation lives in `awgsegmentfactory.phase_minimiser` so it can be used
+from the main library.
+"""
+
+from __future__ import annotations
+
+import time
+
 import numpy as np
-from scipy.optimize import minimize
 
-def multisine(phases_deg, freqs_MHz, amps, time_us=np.linspace(0,1,1000)):
-    return np.sum([amps[i]*np.sin(2*np.pi*time_us*freqs_MHz[i]+ phases_deg[i]*np.pi/180) for i in range(len(phases_deg))],axis=0)
-   
-def crest(phases_deg, freqs_MHz, amps, time_us=np.linspace(0,1,1000)):
-    y = multisine(phases_deg, freqs_MHz, amps, time_us)
-    return np.max(y)/np.sqrt(np.mean(y**2))
+from awgsegmentfactory.phase_minimiser import (
+    MultisineBasis,
+    crest_factor,
+    minimise_crest_factor_phases,
+    schroeder_phases_rad,
+    waveform_from_phases,
+)
 
-def crest_index(phi, phases_deg, ind, freqs_MHz=[85,87,89], amps=[1,1,1]):
-    phases_deg[ind] = phi
-    return crest(phases_deg, freqs_MHz, amps)
 
-def phase_adjust(N):
-    """Minimise the crest factor analytically. This is a good first guess for 
-    the optimum phases to be further optimised numerically. See 
-    DOI 10.5755/j01.eie.23.2.18001.
-    
-    The phases are returned such that the first phase is always zero.
-    
-    Parameters
-    ----------
-    N : int
-        Number of tones to optimise the phases for.
-        
-    Returns
-    -------
-    np.ndarray
-        The analytically optimized phases, in degrees.
-    
-    """
-    i = np.arange(N)
-    phi = 180*(i+1)**2/N
-    phi = (phi - phi[0])%360
-    return phi
-
-def phase_minimise(freqs_MHz=[85,87,89], amps=[1]*3):
-    """Numerically optimise the phases of a multitone sine wave to minimise 
-    the crest factor. The phases are first analytically optimised, before 
-    being numerically optimised together and finally numerically optimised 
-    individually.
-    
-    The phases are returned such that the first phase is always zero.
-    
-    Parameters
-    ----------
-    freqs_MHz : list of float
-        The frequencies of the multiple tones in the signal, in MHz.
-    amps : list of float
-        The relative amplitudes of the tones.
-        
-    Returns
-    -------
-    list
-        The optimised phases of the tones, in degrees.
-        
-    """
-    # if len(amps) != len(freqs_MHz):
-    #     amps = [1]*len(freqs_MHz)
-    # start by optimizing them all
-    result = minimize(crest, phase_adjust(len(freqs_MHz)), args=(freqs_MHz, amps))
-    phases_deg = result.x
-    for i in range(len(freqs_MHz)): # then one by one
-        result = minimize(crest_index, phases_deg[i], args=(phases_deg,i,freqs_MHz,amps))
-        phases_deg[i] = result.x
-    phases_deg = (phases_deg-phases_deg[0])%360
-    return list(phases_deg)    
-
-if __name__ == '__main__':
-    import time
+def main() -> None:
     import matplotlib.pyplot as plt
-    
-    freqs_MHz = [100,101,102,103,104,105,106]
-    amps = [1,1,1,1,1,1,1]
-    
-    print('--- analytical ---')
+
+    freqs_MHz = np.array([100, 101, 102, 103, 104, 105, 106], dtype=float)
+    amps = np.ones_like(freqs_MHz)
+
+    # Evaluate crest factor over a representative window.
+    # If tones are on an integer-MHz grid, 1 µs is a natural period.
+    #
+    # Choose the time grid so we have at least ~7 samples per period of the
+    # highest-frequency tone (avoid being close to Nyquist for crest estimation).
+    samples_per_period = 7
+    # We'll re-use this same grid later for a sweep up to N=20 tones, so pick the
+    # sample rate based on the *largest* frequency in that sweep.
+    n_freq_max = 20
+    f_max_hz = float((freqs_MHz[0] + (n_freq_max - 1)) * 1e6)
+    sample_rate_hz = samples_per_period * f_max_hz
+    t_end_s = 3.0e-6
+    n_samples = int(np.ceil(t_end_s * sample_rate_hz))
+    t_s = np.arange(n_samples, dtype=float) / sample_rate_hz
+
+    basis = MultisineBasis.from_tones(
+        t_s=t_s, freqs_hz=(freqs_MHz * 1e6).tolist(), amps=amps.tolist()
+    )
+
+    phases_same = np.zeros((basis.n_tones,), dtype=float)
+    rng = np.random.default_rng(0)
+    phases_random = rng.uniform(0.0, 2.0 * np.pi, size=(basis.n_tones,))
+
+    print("--- analytical (Schroeder) ---")
     start = time.time()
-    phases = phase_adjust(len(freqs_MHz))
-    # phases = ((phases-phases[0])*180/np.pi)%360
-    print('phases',phases)
-    print('crest factor',crest(phases,freqs_MHz,amps))
-    print('time',time.time()-start)
-    
-    print('\n--- numerical ---')
+    phases0 = schroeder_phases_rad(basis.n_tones)
+    y0 = waveform_from_phases(basis, phases0)
+    cf0 = crest_factor(y0)
+    print("crest factor", cf0)
+    print("time", time.time() - start)
+
+    print("\n--- coordinate refine ---")
     start = time.time()
-    phases = phase_minimise(freqs_MHz, amps)
-    print('phases',(phases))
-    print('crest factor',crest(phases,freqs_MHz,amps))
-    print('time',time.time()-start)
-    
-    y = multisine(phases,freqs_MHz,amps)
-    plt.plot(multisine(phases,freqs_MHz,amps))
+    phases = minimise_crest_factor_phases(
+        basis.freqs_hz,
+        basis.amps,
+        t_s=basis.t_s,
+        passes=1,
+        method="coordinate",
+    )
+    y = waveform_from_phases(basis, phases)
+    cf_opt = crest_factor(y)
+    print("crest factor", cf_opt)
+    print("time", time.time() - start)
+
+    y_same = waveform_from_phases(basis, phases_same)
+    y_rand = waveform_from_phases(basis, phases_random)
+    cf_same = crest_factor(y_same)
+    cf_rand = crest_factor(y_rand)
+
+    print("\n--- baselines ---")
+    print("all phases same crest factor", cf_same)
+    print("random phases crest factor", cf_rand)
+
+    fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 6))
+    axs = axs.ravel()
+    for ax, yy, title in [
+        (axs[0], y_same, f"All phases same (crest {cf_same:.3f})"),
+        (axs[1], y_rand, f"Random phases (crest {cf_rand:.3f})"),
+        (axs[2], y0, f"Schroeder seed (crest {cf0:.3f})"),
+        (axs[3], y, f"Coordinate refined (crest {cf_opt:.3f})"),
+    ]:
+        ax.plot(yy, lw=1.0)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.25)
+    fig.suptitle("Multisine crest-factor phase choices")
+    fig.tight_layout()
+
+    # Sweep number of tones: N=1..20 (1 MHz spacing starting at 100 MHz)
+    n_freqs = np.arange(1, n_freq_max + 1, dtype=int)
+    cf_same_by_n: list[float] = []
+    cf_rand_by_n: list[float] = []
+    cf_seed_by_n: list[float] = []
+    cf_opt_by_n: list[float] = []
+
+    rng_sweep = np.random.default_rng(0)
+    random_trials = 20
+
+    for n in n_freqs:
+        f_MHz = (freqs_MHz[0] + np.arange(n, dtype=float))
+        a = np.ones((n,), dtype=float)
+        basis_n = MultisineBasis.from_tones(
+            t_s=t_s, freqs_hz=(f_MHz * 1e6).tolist(), amps=a.tolist()
+        )
+
+        # Baselines
+        y_same_n = waveform_from_phases(basis_n, np.zeros((n,), dtype=float))
+        cf_same_by_n.append(crest_factor(y_same_n))
+
+        cf_trials: list[float] = []
+        for _ in range(random_trials):
+            phases_r = rng_sweep.uniform(0.0, 2.0 * np.pi, size=(n,))
+            y_r = waveform_from_phases(basis_n, phases_r)
+            cf_trials.append(crest_factor(y_r))
+        cf_rand_by_n.append(float(np.mean(cf_trials)))
+
+        # Seed vs refined
+        phases_seed_n = schroeder_phases_rad(n)
+        y_seed_n = waveform_from_phases(basis_n, phases_seed_n)
+        cf_seed_by_n.append(crest_factor(y_seed_n))
+
+        phases_opt_n = minimise_crest_factor_phases(
+            basis_n.freqs_hz,
+            basis_n.amps,
+            t_s=basis_n.t_s,
+            passes=1,
+            method="coordinate",
+        )
+        y_opt_n = waveform_from_phases(basis_n, phases_opt_n)
+        cf_opt_by_n.append(crest_factor(y_opt_n))
+
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    ax2.plot(n_freqs, cf_same_by_n, marker="o", label="All phases same")
+    ax2.plot(
+        n_freqs,
+        cf_rand_by_n,
+        marker="o",
+        label=f"Random phases (mean of {random_trials})",
+    )
+    ax2.plot(n_freqs, cf_seed_by_n, marker="o", label="Schroeder seed")
+    ax2.plot(n_freqs, cf_opt_by_n, marker="o", label="Coordinate refined")
+    ax2.set_xlabel("Number of tones (N)")
+    ax2.set_ylabel("Crest factor  max(|y|) / rms(y)")
+    ax2.set_title("Crest factor vs number of tones")
+    ax2.set_xticks(n_freqs)
+    ax2.grid(True, alpha=0.25)
+    ax2.legend()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

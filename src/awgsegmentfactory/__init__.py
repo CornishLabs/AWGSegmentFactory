@@ -24,6 +24,7 @@ from .quantize import (
 )
 from .types import ChannelMap
 from .upload import upload_sequence_program
+from .phase_minimiser import minimise_crest_factor_phases, schroeder_phases_rad
 
 __all__ = [
     "AWGProgramBuilder",
@@ -41,4 +42,6 @@ __all__ = [
     "quantize_resolved_ir",
     "quantum_samples",
     "ChannelMap",
+    "minimise_crest_factor_phases",
+    "schroeder_phases_rad",
 ]
