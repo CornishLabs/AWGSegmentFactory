@@ -184,6 +184,69 @@ def _snap_freqs_to_wrap(
     return k / seg_len_s
 
 
+def _segment_boundary_is_continuous(
+    seg0: ResolvedSegment,
+    seg1: ResolvedSegment,
+    *,
+    logical_channel: str,
+) -> bool:
+    """
+    Return True if seg1 starts from seg0's end state for `logical_channel`.
+
+    This is used to preserve state-carry semantics when quantization modifies a segment's
+    parameter values (e.g. wrap-snapping loopable constant frequencies).
+    """
+    if not seg0.parts or not seg1.parts:
+        return False
+    end0 = seg0.parts[-1].logical_channels[logical_channel].end
+    start1 = seg1.parts[0].logical_channels[logical_channel].start
+    return (
+        np.array_equal(end0.freqs_hz, start1.freqs_hz)
+        and np.array_equal(end0.amps, start1.amps)
+        and np.array_equal(end0.phases_rad, start1.phases_rad)
+    )
+
+
+def _shift_segment_freqs(
+    seg: ResolvedSegment, *, logical_channel: str, delta_freqs_hz: np.ndarray
+) -> ResolvedSegment:
+    """Return a copy of `seg` with `delta_freqs_hz` added to start/end freqs for one logical channel."""
+    delta = np.asarray(delta_freqs_hz, dtype=float).reshape(-1)
+    new_parts: list[ResolvedPart] = []
+    for part in seg.parts:
+        pp = part.logical_channels[logical_channel]
+        if pp.start.freqs_hz.shape != delta.shape:
+            raise ValueError(
+                f"Cannot shift segment {seg.name!r} logical_channel {logical_channel!r}: "
+                f"delta shape {delta.shape} != tone shape {pp.start.freqs_hz.shape}"
+            )
+        new_pp = ResolvedLogicalChannelPart(
+            start=LogicalChannelState(
+                freqs_hz=pp.start.freqs_hz + delta,
+                amps=pp.start.amps.copy(),
+                phases_rad=pp.start.phases_rad.copy(),
+            ),
+            end=LogicalChannelState(
+                freqs_hz=pp.end.freqs_hz + delta,
+                amps=pp.end.amps.copy(),
+                phases_rad=pp.end.phases_rad.copy(),
+            ),
+            interp=pp.interp,
+        )
+        new_logical_channels = dict(part.logical_channels)
+        new_logical_channels[logical_channel] = new_pp
+        new_parts.append(
+            ResolvedPart(n_samples=part.n_samples, logical_channels=new_logical_channels)
+        )
+    return ResolvedSegment(
+        name=seg.name,
+        mode=seg.mode,
+        loop=seg.loop,
+        parts=tuple(new_parts),
+        phase_mode=seg.phase_mode,
+    )
+
+
 def quantize_resolved_ir(
     ir: ResolvedIR,
     *,
@@ -200,16 +263,47 @@ def quantize_resolved_ir(
       (but at least one quantum), and constant segments get frequency wrap-snapping.
     """
     fs = float(ir.sample_rate_hz)
+    missing = [lc for lc in ir.logical_channels if lc not in logical_channel_to_hardware_channel]
+    if missing:
+        raise KeyError(
+            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
+        )
+    hw = [int(logical_channel_to_hardware_channel[lc]) for lc in ir.logical_channels]
+    if any(h < 0 for h in hw):
+        raise ValueError(
+            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
+        )
+    if len(set(hw)) != len(hw):
+        raise ValueError(
+            "Each logical channel must map to a unique hardware channel; "
+            f"got {sorted(hw)} for logical_channels={list(ir.logical_channels)}"
+        )
+    hw_set = set(hw)
+    if hw_set != set(range(len(hw_set))):
+        raise ValueError(
+            "Hardware channel indices must be contiguous 0..N-1; "
+            f"got {sorted(hw_set)}"
+        )
     q_samples = quantum_samples(
         fs, quantum_s=segment_quantum_s, step_samples=step_samples
     )
 
-    n_channels = len(set(logical_channel_to_hardware_channel.values()))
+    n_channels = len(hw_set)
     min_samples = min_segment_samples_per_channel(n_channels=n_channels)
     min_samples = _ceil_to_multiple(min_samples, step_samples)
 
     infos: list[SegmentQuantizationInfo] = []
     out_segments: list[ResolvedSegment] = []
+
+    # Track which segment boundaries were continuous in the input IR.
+    boundary_continuity: list[dict[str, bool]] = []
+    for seg0, seg1 in zip(ir.segments, ir.segments[1:]):
+        boundary_continuity.append(
+            {
+                lc: _segment_boundary_is_continuous(seg0, seg1, logical_channel=lc)
+                for lc in ir.logical_channels
+            }
+        )
 
     for seg in ir.segments:
         loopable = seg.mode == "wait_trig" or seg.loop > 1
@@ -328,10 +422,31 @@ def quantize_resolved_ir(
             )
         )
 
+    # Preserve state-carry semantics across segment boundaries even if quantization changed
+    # parameter values within a segment (e.g. wrap-snapping loopable constant freqs).
+    reconciled: list[ResolvedSegment] = list(out_segments)
+    for i in range(len(reconciled) - 1):
+        seg0 = reconciled[i]
+        seg1 = reconciled[i + 1]
+        if not seg0.parts or not seg1.parts:
+            continue
+        for lc in ir.logical_channels:
+            if not boundary_continuity[i][lc]:
+                continue
+            end0 = seg0.parts[-1].logical_channels[lc].end
+            start1 = seg1.parts[0].logical_channels[lc].start
+            if end0.freqs_hz.shape != start1.freqs_hz.shape:
+                continue
+            delta = end0.freqs_hz - start1.freqs_hz
+            if np.all(delta == 0.0):
+                continue
+            seg1 = _shift_segment_freqs(seg1, logical_channel=lc, delta_freqs_hz=delta)
+        reconciled[i + 1] = seg1
+
     q_ir = ResolvedIR(
         sample_rate_hz=fs,
         logical_channels=ir.logical_channels,
-        segments=tuple(out_segments),
+        segments=tuple(reconciled),
     )
     return QuantizedIR(
         resolved_ir=q_ir,

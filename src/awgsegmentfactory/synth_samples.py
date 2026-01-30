@@ -154,6 +154,57 @@ def _optimise_phases_for_crest(
     )
 
 
+def _plan_segment_start_phases(
+    seg: ResolvedSegment,
+    *,
+    logical_channel: str,
+    phase_in: Optional[_PhaseContinueState],
+) -> np.ndarray:
+    """Return start phases (CPU/NumPy array) for one segment/logical channel according to `seg.phase_mode`."""
+    if not seg.parts:
+        return np.zeros((0,), dtype=float)
+
+    first = seg.parts[0].logical_channels[logical_channel]
+    n_tones = int(first.start.freqs_hz.shape[0])
+
+    phase_mode = str(getattr(seg, "phase_mode", "continue"))
+    if phase_mode not in ("manual", "continue", "optimise"):
+        raise ValueError(f"Unknown phase_mode {phase_mode!r}")
+
+    start_phases = np.asarray(first.start.phases_rad, dtype=float).reshape(-1).copy()
+    if n_tones == 0:
+        return start_phases
+
+    if phase_mode == "manual":
+        return start_phases
+    if phase_mode == "optimise":
+        return _optimise_phases_for_crest(
+            freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
+            amps=np.asarray(first.start.amps, dtype=float),
+        )
+
+    # phase_mode == "continue"
+    if phase_in is None:
+        return start_phases
+
+    mapping = _match_tones_by_frequency(
+        np.asarray(phase_in.freqs_hz, dtype=float),
+        np.asarray(first.start.freqs_hz, dtype=float),
+    )
+    fixed = np.zeros((n_tones,), dtype=bool)
+    for cur_i, prev_i in mapping.items():
+        start_phases[cur_i] = float(phase_in.phases_rad[prev_i])
+        fixed[cur_i] = True
+    if np.any(~fixed):
+        return _optimise_phases_for_crest(
+            freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
+            amps=np.asarray(first.start.amps, dtype=float),
+            phases_init_rad=start_phases,
+            fixed_mask=fixed,
+        )
+    return start_phases
+
+
 def _interp_logical_channel_part(
     pp: ResolvedLogicalChannelPart,
     *,
@@ -257,48 +308,13 @@ def _synth_logical_channel_segment(
     if not seg.parts:
         return xp.zeros((0,), dtype=float), xp.zeros((0,), dtype=float)
 
-    first = seg.parts[0].logical_channels[logical_channel]
-    n_tones = int(first.start.freqs_hz.shape[0])
-
-    phase_mode = str(getattr(seg, "phase_mode", "continue"))
-    if phase_mode not in ("manual", "continue", "optimise"):
-        raise ValueError(f"Unknown phase_mode {phase_mode!r}")
-
-    start_phases = np.asarray(first.start.phases_rad, dtype=float).reshape(-1).copy()
-
-    if n_tones == 0:
-        phase0_np = start_phases
-    elif phase_mode == "manual":
-        phase0_np = start_phases
-    elif phase_mode == "optimise":
-        phase0_np = _optimise_phases_for_crest(
-            freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
-            amps=np.asarray(first.start.amps, dtype=float),
-        )
-    else:
-        # phase_mode == "continue"
-        if phase_in is None:
-            phase0_np = start_phases
-        else:
-            mapping = _match_tones_by_frequency(
-                np.asarray(phase_in.freqs_hz, dtype=float),
-                np.asarray(first.start.freqs_hz, dtype=float),
-            )
-            fixed = np.zeros((n_tones,), dtype=bool)
-            for cur_i, prev_i in mapping.items():
-                start_phases[cur_i] = float(phase_in.phases_rad[prev_i])
-                fixed[cur_i] = True
-            if np.any(~fixed):
-                phase0_np = _optimise_phases_for_crest(
-                    freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
-                    amps=np.asarray(first.start.amps, dtype=float),
-                    phases_init_rad=start_phases,
-                    fixed_mask=fixed,
-                )
-            else:
-                phase0_np = start_phases
-
-    phase = xp.asarray(phase0_np).copy()
+    phase0_np = _plan_segment_start_phases(
+        seg,
+        logical_channel=logical_channel,
+        phase_in=phase_in,
+    )
+    phase_dtype = xp.float32 if xp is not np else float
+    phase = xp.asarray(phase0_np, dtype=phase_dtype).copy()
 
     ys: list[Any] = []
     for part in seg.parts:
@@ -418,11 +434,33 @@ def compile_sequence_program(
     logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
     q_info = quantized.quantization
 
+    missing = [lc for lc in q_ir.logical_channels if lc not in logical_channel_to_hardware_channel]
+    if missing:
+        raise KeyError(
+            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
+        )
+    hw = [int(logical_channel_to_hardware_channel[lc]) for lc in q_ir.logical_channels]
+    if any(h < 0 for h in hw):
+        raise ValueError(
+            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
+        )
+    if len(set(hw)) != len(hw):
+        raise ValueError(
+            "Each logical channel must map to a unique hardware channel; "
+            f"got {sorted(hw)} for logical_channels={list(q_ir.logical_channels)}"
+        )
+    hw_set = set(hw)
+    if hw_set != set(range(len(hw_set))):
+        raise ValueError(
+            "Hardware channel indices must be contiguous 0..N-1; "
+            f"got {sorted(hw_set)}"
+        )
+
     n_segments = len(q_ir.segments)
     if n_segments == 0:
         raise ValueError("No segments to compile")
 
-    n_channels = max(logical_channel_to_hardware_channel.values()) + 1
+    n_channels = len(hw_set)
 
     compiled_segments: list[CompiledSegment] = []
     compiled_steps: list[SequenceStep] = []
@@ -446,10 +484,6 @@ def compile_sequence_program(
         data = xp.zeros((n_channels, n), dtype=xp.int16)
 
         for logical_channel in q_ir.logical_channels:
-            if logical_channel not in logical_channel_to_hardware_channel:
-                raise KeyError(
-                    f"No hardware channel mapping for logical_channel {logical_channel!r}"
-                )
             hw_ch = int(logical_channel_to_hardware_channel[logical_channel])
             y, phase_out = _synth_logical_channel_segment(
                 seg,
