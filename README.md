@@ -78,6 +78,16 @@ print("segments:", len(compiled.segments))
 print("steps:", len(compiled.steps))
 ```
 
+### GPU synthesis (optional)
+
+If you have CuPy + an NVIDIA GPU available, `compile_sequence_program(..., gpu=True)` runs the
+sample-synthesis stage on the GPU (resolve/quantize are still CPU).
+
+- `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
+- `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
+
+See `examples/benchmark_pipeline.py --gpu`.
+
 ### 3) Debug helpers (optional)
 
 Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency group

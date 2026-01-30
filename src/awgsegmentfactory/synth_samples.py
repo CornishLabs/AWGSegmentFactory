@@ -326,9 +326,8 @@ def compile_sequence_program(
             )
             phase_state[logical_channel] = phase_out
 
-            y = gain * y
-            y = xp.clip(y, -1.0, 1.0)
-            samp = xp.rint(y * (clip * float(full_scale))).astype(xp.int16)
+            y = xp.clip(gain * y, -float(clip), float(clip))
+            samp = xp.rint(y * float(full_scale)).astype(xp.int16)
             data[hw_ch, :] = samp
 
         if cp is not None and output == "numpy":

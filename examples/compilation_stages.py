@@ -8,7 +8,8 @@ Show the different "depths" of compilation for AWGSegmentFactory:
 5) ResolvedTimeline (debug view for plotting / state queries)
 
 This is also a sketch of how a NumPy/CuPy backend could turn `ResolvedIR`
-parts into vectorised arrays (freq/amp/phase per sample).
+parts into vectorised arrays (freq/amp/phase per sample). This idea is now
+implemented in the main compiler via `compile_sequence_program(..., gpu=True)`.
 """
 
 from __future__ import annotations

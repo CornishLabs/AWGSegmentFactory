@@ -55,6 +55,70 @@ def _select_idxs(n: int, idxs: Optional[Tuple[int, ...]]) -> np.ndarray:
     return idx
 
 
+def _apply_freq_delta(
+    start: LogicalChannelState, *, df_hz: float, idx: np.ndarray
+) -> LogicalChannelState:
+    f1 = start.freqs_hz.copy()
+    f1[idx] = f1[idx] + float(df_hz)
+    return LogicalChannelState(
+        freqs_hz=f1,
+        amps=start.amps.copy(),
+        phases_rad=start.phases_rad.copy(),
+    )
+
+
+def _apply_amp_target(
+    start: LogicalChannelState, *, amps_target: object, idx: np.ndarray
+) -> LogicalChannelState:
+    a1 = start.amps.copy()
+    if isinstance(amps_target, tuple):
+        tgt = np.array(amps_target, dtype=float)
+        if len(tgt) == 1:
+            tgt = np.repeat(tgt, len(idx))
+        if len(tgt) != len(idx):
+            raise ValueError("ramp_amp_to: target length mismatch for selected idxs")
+        a1[idx] = tgt
+    else:
+        a1[idx] = float(amps_target)  # type: ignore[arg-type]
+    return LogicalChannelState(
+        freqs_hz=start.freqs_hz.copy(),
+        amps=a1,
+        phases_rad=start.phases_rad.copy(),
+    )
+
+
+def _remap_from_def_states(
+    intent: IntentIR,
+    *,
+    logical_channel: str,
+    target_def: str,
+    src: Tuple[int, ...],
+    dst: Tuple[int, ...],
+    start_full: LogicalChannelState,
+) -> tuple[LogicalChannelState, LogicalChannelState]:
+    d = intent.definitions[target_def]
+    if d.logical_channel != logical_channel:
+        raise ValueError(
+            f"Definition {d.name} is for logical_channel {d.logical_channel}, "
+            f"not {logical_channel}"
+        )
+
+    tf = np.array(d.freqs_hz, dtype=float)[list(dst)]
+    ta = np.array(d.amps, dtype=float)[list(dst)]
+    tp = np.array(d.phases_rad, dtype=float)[list(dst)]
+
+    sf = start_full.freqs_hz[list(src)]
+    sa = start_full.amps[list(src)]
+    sp = start_full.phases_rad[list(src)]
+
+    if len(sf) != len(tf):
+        raise ValueError(f"remap_from_def: src len {len(sf)} != dst len {len(tf)}")
+
+    start_sel = LogicalChannelState(freqs_hz=sf, amps=sa, phases_rad=sp)
+    end = LogicalChannelState(freqs_hz=tf, amps=ta, phases_rad=tp)
+    return start_sel, end
+
+
 def _hold_parts(
     intent: IntentIR, cur: Dict[str, LogicalChannelState]
 ) -> Dict[str, ResolvedLogicalChannelPart]:
@@ -213,55 +277,26 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                             start = cur[sub.logical_channel]
                             nn = len(start.freqs_hz)
                             idx = _select_idxs(nn, sub.idxs)
-                            f1 = start.freqs_hz.copy()
-                            f1[idx] = f1[idx] + float(sub.df_hz)
-                            cur[sub.logical_channel] = LogicalChannelState(
-                                freqs_hz=f1,
-                                amps=start.amps.copy(),
-                                phases_rad=start.phases_rad.copy(),
+                            cur[sub.logical_channel] = _apply_freq_delta(
+                                start, df_hz=sub.df_hz, idx=idx
                             )
                         elif isinstance(sub, RampAmpToOp):
                             start = cur[sub.logical_channel]
                             nn = len(start.amps)
                             idx = _select_idxs(nn, sub.idxs)
-                            a1 = start.amps.copy()
-                            if isinstance(sub.amps_target, tuple):
-                                tgt = np.array(sub.amps_target, dtype=float)
-                                if len(tgt) == 1:
-                                    tgt = np.repeat(tgt, len(idx))
-                                if len(tgt) != len(idx):
-                                    raise ValueError(
-                                        "ramp_amp_to: target length mismatch for selected idxs"
-                                    )
-                                a1[idx] = tgt
-                            else:
-                                a1[idx] = float(sub.amps_target)
-                            cur[sub.logical_channel] = LogicalChannelState(
-                                freqs_hz=start.freqs_hz.copy(),
-                                amps=a1,
-                                phases_rad=start.phases_rad.copy(),
+                            cur[sub.logical_channel] = _apply_amp_target(
+                                start, amps_target=sub.amps_target, idx=idx
                             )
                         elif isinstance(sub, RemapFromDefOp):
-                            d = intent.definitions[sub.target_def]
-                            if d.logical_channel != sub.logical_channel:
-                                raise ValueError(
-                                    f"Definition {d.name} is for logical_channel {d.logical_channel}, "
-                                    f"not {sub.logical_channel}"
-                                )
-                            start = cur[sub.logical_channel]
-                            tf = np.array(d.freqs_hz, dtype=float)[list(sub.dst)]
-                            ta = np.array(d.amps, dtype=float)[list(sub.dst)]
-                            tp = np.array(d.phases_rad, dtype=float)[list(sub.dst)]
-                            sf = start.freqs_hz[list(sub.src)]
-                            sa = start.amps[list(sub.src)]
-                            sp = start.phases_rad[list(sub.src)]
-                            if len(sf) != len(tf):
-                                raise ValueError(
-                                    f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
-                                )
-                            cur[sub.logical_channel] = LogicalChannelState(
-                                freqs_hz=tf, amps=ta, phases_rad=tp
+                            _start_sel, end = _remap_from_def_states(
+                                intent,
+                                logical_channel=sub.logical_channel,
+                                target_def=sub.target_def,
+                                src=sub.src,
+                                dst=sub.dst,
+                                start_full=cur[sub.logical_channel],
                             )
+                            cur[sub.logical_channel] = end
                         else:  # pragma: no cover
                             raise TypeError(f"parallel: unsupported op type {type(sub)}")
                     continue
@@ -275,14 +310,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         start = cur[lc]
                         nn = len(start.freqs_hz)
                         idx = _select_idxs(nn, sub.idxs)
-
-                        f1 = start.freqs_hz.copy()
-                        f1[idx] = f1[idx] + float(sub.df_hz)
-                        end = LogicalChannelState(
-                            freqs_hz=f1,
-                            amps=start.amps.copy(),
-                            phases_rad=start.phases_rad.copy(),
-                        )
+                        end = _apply_freq_delta(start, df_hz=sub.df_hz, idx=idx)
                         logical_channels[lc] = ResolvedLogicalChannelPart(
                             start=start, end=end, interp=sub.interp
                         )
@@ -293,24 +321,8 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         start = cur[lc]
                         nn = len(start.amps)
                         idx = _select_idxs(nn, sub.idxs)
-
-                        a1 = start.amps.copy()
-                        if isinstance(sub.amps_target, tuple):
-                            tgt = np.array(sub.amps_target, dtype=float)
-                            if len(tgt) == 1:
-                                tgt = np.repeat(tgt, len(idx))
-                            if len(tgt) != len(idx):
-                                raise ValueError(
-                                    "ramp_amp_to: target length mismatch for selected idxs"
-                                )
-                            a1[idx] = tgt
-                        else:
-                            a1[idx] = float(sub.amps_target)
-
-                        end = LogicalChannelState(
-                            freqs_hz=start.freqs_hz.copy(),
-                            amps=a1,
-                            phases_rad=start.phases_rad.copy(),
+                        end = _apply_amp_target(
+                            start, amps_target=sub.amps_target, idx=idx
                         )
                         logical_channels[lc] = ResolvedLogicalChannelPart(
                             start=start, end=end, interp=sub.interp
@@ -319,30 +331,16 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                     elif isinstance(sub, RemapFromDefOp):
                         if sub.time_s != op.time_s:
                             raise ValueError("parallel: sub-op time mismatch")
-                        d = intent.definitions[sub.target_def]
-                        if d.logical_channel != sub.logical_channel:
-                            raise ValueError(
-                                f"Definition {d.name} is for logical_channel {d.logical_channel}, "
-                                f"not {sub.logical_channel}"
-                            )
-
-                        start_full = cur[lc]
-                        tf = np.array(d.freqs_hz, dtype=float)[list(sub.dst)]
-                        ta = np.array(d.amps, dtype=float)[list(sub.dst)]
-                        tp = np.array(d.phases_rad, dtype=float)[list(sub.dst)]
-
-                        sf = start_full.freqs_hz[list(sub.src)]
-                        sa = start_full.amps[list(sub.src)]
-                        sp = start_full.phases_rad[list(sub.src)]
-
-                        if len(sf) != len(tf):
-                            raise ValueError(
-                                f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
-                            )
-
-                        end = LogicalChannelState(freqs_hz=tf, amps=ta, phases_rad=tp)
+                        start_sel, end = _remap_from_def_states(
+                            intent,
+                            logical_channel=sub.logical_channel,
+                            target_def=sub.target_def,
+                            src=sub.src,
+                            dst=sub.dst,
+                            start_full=cur[lc],
+                        )
                         logical_channels[lc] = ResolvedLogicalChannelPart(
-                            start=LogicalChannelState(sf, sa, sp),
+                            start=start_sel,
                             end=end,
                             interp=sub.interp,
                         )
@@ -362,30 +360,15 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                 continue
 
             if isinstance(op, RemapFromDefOp):
-                d = intent.definitions[op.target_def]
-                if d.logical_channel != op.logical_channel:
-                    raise ValueError(
-                        f"Definition {d.name} is for logical_channel {d.logical_channel}, "
-                        f"not {op.logical_channel}"
-                    )
-
-                start = cur[op.logical_channel]
-                # build target arrays at dst indices
-                tf = np.array(d.freqs_hz, dtype=float)[list(op.dst)]
-                ta = np.array(d.amps, dtype=float)[list(op.dst)]
-                tp = np.array(d.phases_rad, dtype=float)[list(op.dst)]
-
-                # take current src values
-                sf = start.freqs_hz[list(op.src)]
-                sa = start.amps[list(op.src)]
-                sp = start.phases_rad[list(op.src)]
-
-                if len(sf) != len(tf):
-                    raise ValueError(
-                        f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
-                    )
-
-                end = LogicalChannelState(freqs_hz=tf, amps=ta, phases_rad=tp)
+                start_full = cur[op.logical_channel]
+                start_sel, end = _remap_from_def_states(
+                    intent,
+                    logical_channel=op.logical_channel,
+                    target_def=op.target_def,
+                    src=op.src,
+                    dst=op.dst,
+                    start_full=start_full,
+                )
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
@@ -396,7 +379,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                         n_samples=n,
                         logical_channel=op.logical_channel,
                         target_part=ResolvedLogicalChannelPart(
-                            start=LogicalChannelState(sf, sa, sp),
+                            start=start_sel,
                             end=end,
                             interp=op.interp,
                         ),
@@ -412,15 +395,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                 start = cur[op.logical_channel]
                 n = len(start.freqs_hz)
                 idx = _select_idxs(n, op.idxs)
-
-                f1 = start.freqs_hz.copy()
-                f1[idx] = f1[idx] + float(op.df_hz)
-
-                end = LogicalChannelState(
-                    freqs_hz=f1,
-                    amps=start.amps.copy(),
-                    phases_rad=start.phases_rad.copy(),
-                )
+                end = _apply_freq_delta(start, df_hz=op.df_hz, idx=idx)
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
@@ -445,25 +420,7 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                 start = cur[op.logical_channel]
                 n = len(start.amps)
                 idx = _select_idxs(n, op.idxs)
-
-                a1 = start.amps.copy()
-                if isinstance(op.amps_target, tuple):
-                    tgt = np.array(op.amps_target, dtype=float)
-                    if len(tgt) == 1:
-                        tgt = np.repeat(tgt, len(idx))
-                    if len(tgt) != len(idx):
-                        raise ValueError(
-                            "ramp_amp_to: target length mismatch for selected idxs"
-                        )
-                    a1[idx] = tgt
-                else:
-                    a1[idx] = float(op.amps_target)
-
-                end = LogicalChannelState(
-                    freqs_hz=start.freqs_hz.copy(),
-                    amps=a1,
-                    phases_rad=start.phases_rad.copy(),
-                )
+                end = _apply_amp_target(start, amps_target=op.amps_target, idx=idx)
 
                 n = _ceil_samples(fs, op.time_s)
                 if n > 0:
