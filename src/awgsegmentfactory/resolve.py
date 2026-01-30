@@ -15,6 +15,7 @@ from .intent_ir import (
     UseDefOp,
     AddToneOp,
     RemoveTonesOp,
+    ParallelOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
@@ -189,6 +190,175 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                     amps=start.amps[mask],
                     phases_rad=start.phases_rad[mask],
                 )
+                continue
+
+            if isinstance(op, ParallelOp):
+                n = _ceil_samples(fs, op.time_s)
+
+                by_lc: dict[str, object] = {}
+                for sub in op.ops:
+                    if not hasattr(sub, "logical_channel"):
+                        raise TypeError("parallel: sub-op must have a logical_channel")
+                    lc = sub.logical_channel  # type: ignore[attr-defined]
+                    if lc in by_lc:
+                        raise ValueError(
+                            f"parallel: multiple ops for logical_channel {lc!r}"
+                        )
+                    by_lc[lc] = sub
+
+                if n <= 0:
+                    # Treat as instantaneous: apply sub-ops as state updates.
+                    for sub in by_lc.values():
+                        if isinstance(sub, MoveOp):
+                            start = cur[sub.logical_channel]
+                            nn = len(start.freqs_hz)
+                            idx = _select_idxs(nn, sub.idxs)
+                            f1 = start.freqs_hz.copy()
+                            f1[idx] = f1[idx] + float(sub.df_hz)
+                            cur[sub.logical_channel] = LogicalChannelState(
+                                freqs_hz=f1,
+                                amps=start.amps.copy(),
+                                phases_rad=start.phases_rad.copy(),
+                            )
+                        elif isinstance(sub, RampAmpToOp):
+                            start = cur[sub.logical_channel]
+                            nn = len(start.amps)
+                            idx = _select_idxs(nn, sub.idxs)
+                            a1 = start.amps.copy()
+                            if isinstance(sub.amps_target, tuple):
+                                tgt = np.array(sub.amps_target, dtype=float)
+                                if len(tgt) == 1:
+                                    tgt = np.repeat(tgt, len(idx))
+                                if len(tgt) != len(idx):
+                                    raise ValueError(
+                                        "ramp_amp_to: target length mismatch for selected idxs"
+                                    )
+                                a1[idx] = tgt
+                            else:
+                                a1[idx] = float(sub.amps_target)
+                            cur[sub.logical_channel] = LogicalChannelState(
+                                freqs_hz=start.freqs_hz.copy(),
+                                amps=a1,
+                                phases_rad=start.phases_rad.copy(),
+                            )
+                        elif isinstance(sub, RemapFromDefOp):
+                            d = intent.definitions[sub.target_def]
+                            if d.logical_channel != sub.logical_channel:
+                                raise ValueError(
+                                    f"Definition {d.name} is for logical_channel {d.logical_channel}, "
+                                    f"not {sub.logical_channel}"
+                                )
+                            start = cur[sub.logical_channel]
+                            tf = np.array(d.freqs_hz, dtype=float)[list(sub.dst)]
+                            ta = np.array(d.amps, dtype=float)[list(sub.dst)]
+                            tp = np.array(d.phases_rad, dtype=float)[list(sub.dst)]
+                            sf = start.freqs_hz[list(sub.src)]
+                            sa = start.amps[list(sub.src)]
+                            sp = start.phases_rad[list(sub.src)]
+                            if len(sf) != len(tf):
+                                raise ValueError(
+                                    f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
+                                )
+                            cur[sub.logical_channel] = LogicalChannelState(
+                                freqs_hz=tf, amps=ta, phases_rad=tp
+                            )
+                        else:  # pragma: no cover
+                            raise TypeError(f"parallel: unsupported op type {type(sub)}")
+                    continue
+
+                logical_channels = _hold_parts(intent, cur)
+                end_states: dict[str, LogicalChannelState] = {}
+                for lc, sub in by_lc.items():
+                    if isinstance(sub, MoveOp):
+                        if sub.time_s != op.time_s:
+                            raise ValueError("parallel: sub-op time mismatch")
+                        start = cur[lc]
+                        nn = len(start.freqs_hz)
+                        idx = _select_idxs(nn, sub.idxs)
+
+                        f1 = start.freqs_hz.copy()
+                        f1[idx] = f1[idx] + float(sub.df_hz)
+                        end = LogicalChannelState(
+                            freqs_hz=f1,
+                            amps=start.amps.copy(),
+                            phases_rad=start.phases_rad.copy(),
+                        )
+                        logical_channels[lc] = ResolvedLogicalChannelPart(
+                            start=start, end=end, interp=sub.interp
+                        )
+                        end_states[lc] = end
+                    elif isinstance(sub, RampAmpToOp):
+                        if sub.time_s != op.time_s:
+                            raise ValueError("parallel: sub-op time mismatch")
+                        start = cur[lc]
+                        nn = len(start.amps)
+                        idx = _select_idxs(nn, sub.idxs)
+
+                        a1 = start.amps.copy()
+                        if isinstance(sub.amps_target, tuple):
+                            tgt = np.array(sub.amps_target, dtype=float)
+                            if len(tgt) == 1:
+                                tgt = np.repeat(tgt, len(idx))
+                            if len(tgt) != len(idx):
+                                raise ValueError(
+                                    "ramp_amp_to: target length mismatch for selected idxs"
+                                )
+                            a1[idx] = tgt
+                        else:
+                            a1[idx] = float(sub.amps_target)
+
+                        end = LogicalChannelState(
+                            freqs_hz=start.freqs_hz.copy(),
+                            amps=a1,
+                            phases_rad=start.phases_rad.copy(),
+                        )
+                        logical_channels[lc] = ResolvedLogicalChannelPart(
+                            start=start, end=end, interp=sub.interp
+                        )
+                        end_states[lc] = end
+                    elif isinstance(sub, RemapFromDefOp):
+                        if sub.time_s != op.time_s:
+                            raise ValueError("parallel: sub-op time mismatch")
+                        d = intent.definitions[sub.target_def]
+                        if d.logical_channel != sub.logical_channel:
+                            raise ValueError(
+                                f"Definition {d.name} is for logical_channel {d.logical_channel}, "
+                                f"not {sub.logical_channel}"
+                            )
+
+                        start_full = cur[lc]
+                        tf = np.array(d.freqs_hz, dtype=float)[list(sub.dst)]
+                        ta = np.array(d.amps, dtype=float)[list(sub.dst)]
+                        tp = np.array(d.phases_rad, dtype=float)[list(sub.dst)]
+
+                        sf = start_full.freqs_hz[list(sub.src)]
+                        sa = start_full.amps[list(sub.src)]
+                        sp = start_full.phases_rad[list(sub.src)]
+
+                        if len(sf) != len(tf):
+                            raise ValueError(
+                                f"remap_from_def: src len {len(sf)} != dst len {len(tf)}"
+                            )
+
+                        end = LogicalChannelState(freqs_hz=tf, amps=ta, phases_rad=tp)
+                        logical_channels[lc] = ResolvedLogicalChannelPart(
+                            start=LogicalChannelState(sf, sa, sp),
+                            end=end,
+                            interp=sub.interp,
+                        )
+                        end_states[lc] = end
+                    else:  # pragma: no cover
+                        raise TypeError(f"parallel: unsupported op type {type(sub)}")
+
+                parts.append(
+                    ResolvedPart(n_samples=n, logical_channels=logical_channels)
+                )
+                segment_tone_counts = _update_segment_tone_counts(
+                    seg.name, segment_tone_counts, parts[-1]
+                )
+                seg_samples += n
+                for lc, end in end_states.items():
+                    cur[lc] = end
                 continue
 
             if isinstance(op, RemapFromDefOp):

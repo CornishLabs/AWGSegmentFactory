@@ -182,3 +182,34 @@ class TestBuilder(unittest.TestCase):
             full_scale=20000,
         )
         self.assertGreater(len(prog.segments), 0)
+
+    def test_parallel_ops_share_one_time_interval(self) -> None:
+        fs = 1000.0
+        b = (
+            AWGProgramBuilder()
+            .logical_channel("H")
+            .logical_channel("V")
+            .define("h0", logical_channel="H", freqs=[10.0], amps=[0.5], phases="auto")
+            .define("v0", logical_channel="V", freqs=[20.0], amps=[0.5], phases="auto")
+            .segment("init", mode="once")
+            .tones("H")
+            .use_def("h0")
+            .tones("V")
+            .use_def("v0")
+            .hold(time=0.1)
+            .segment("ramp_off", mode="once")
+            .parallel(
+                lambda p: (
+                    p.tones("H").ramp_amp_to(amps=0.0, time=0.2),
+                    p.tones("V").ramp_amp_to(amps=0.0, time=0.2),
+                )
+            )
+        )
+
+        ir = b.build_resolved_ir(sample_rate_hz=fs)
+        seg = next(s for s in ir.segments if s.name == "ramp_off")
+        self.assertEqual(seg.n_samples, 200)
+        self.assertEqual(len(seg.parts), 1)
+        part = seg.parts[0]
+        self.assertEqual(part.logical_channels["H"].interp.kind, "linear")
+        self.assertEqual(part.logical_channels["V"].interp.kind, "linear")

@@ -128,7 +128,7 @@ def recreate_mol_exp():
             "loading_H",
             logical_channel="H",
             freqs=np.linspace(80.0e6, 120.0e6, 12),
-            amps=[0.7] * 12,
+            amps=[0.08] * 12,
             phases="auto",
         )
         .define("loading_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
@@ -136,7 +136,7 @@ def recreate_mol_exp():
             "exp_H",
             logical_channel="H",
             freqs=np.linspace(90.0e6, 110.0e6, 8),
-            amps=[0.7] * 8,
+            amps=[0.08] * 8,
             phases="auto",
         )
         .define("exp_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
@@ -172,7 +172,7 @@ def recreate_mol_exp():
         .segment("equalise_amps", mode="loop_n", loop=1)
             .tones("H")
             .ramp_amp_to(
-                amps=[0.73, 0.68, 0.67, 0.75, 0.62, 0.81, 0.74, 0.73],
+                amps=0.15*np.array([0.73, 0.68, 0.67, 0.75, 0.62, 0.81, 0.74, 0.73]),
                 time=1e-3,
                 kind="adiabatic_ramp"
             )
@@ -185,10 +185,12 @@ def recreate_mol_exp():
             .move(df=-2e6, time=1e-3, idxs=[0])  # idxs defaults to "all" if omitted
         # 8) Ramp off (both logical channels)
         .segment("ramp_off", mode="loop_n", loop=1)
-            .tones("H")
-            .ramp_amp_to(amps=0.0, time=2e-3, kind="adiabatic_ramp")
-            .tones("V")
-            .ramp_amp_to(amps=0.0, time=2e-3, kind="adiabatic_ramp")
+            .parallel(
+                lambda p: p.tones("H")
+                .ramp_amp_to(amps=0.0, time=2e-3, kind="adiabatic_ramp")
+                .tones("V")
+                .ramp_amp_to(amps=0.0, time=2e-3, kind="adiabatic_ramp")
+            )
         # 9) Wait (still wrap-continuous; frequency snapping still meaningful)
         .segment("wait_for_trigger_C", mode="wait_trig")
             .hold(time=40e-6)
@@ -197,20 +199,21 @@ def recreate_mol_exp():
             # .tones("V")
             # .move(df=+2e6, time=0.0)  # state update only
             .tones("H")
-            .ramp_amp_to(amps=0.7, time=0.0)  # state update only
+            .ramp_amp_to(amps=0.12, time=0.0)  # state update only
             .tones("V")
-            .ramp_amp_to(amps=0.7, time=2e-3, kind="adiabatic_ramp")  # gives segment duration
+            .ramp_amp_to(amps=0.4, time=2e-3, kind="adiabatic_ramp")  # gives segment duration
         # 11) Move back (V only)
         .segment("move_up", mode="loop_n", loop=1)
             .tones("V")
-            .move(df=(-2e6), time=2e-3, idxs=[0])
+            .move(df=(-0.1e6), time=0, idxs=[0])
+            .move(df=(-1.9e6), time=2e-3, idxs=[0])
         .segment("wait_for_pullback", mode="wait_trig")
             .hold(time=40e-6)
         # 12)
         .segment("turn_on_detect", mode="loop_n", loop=1, phase_mode="fixed")
             .tones("V")
             .add_tone(f=98.2e6)  # defaults: amp=0.0, phase=0.0
-            .ramp_amp_to(idxs=[1], amps=0.7, time=2e-3, kind="adiabatic_ramp")
+            .ramp_amp_to(idxs=[1], amps=0.4, time=2e-3, kind="adiabatic_ramp")
         # 13) Move back (V only)
         .segment("move_down", mode="loop_n", loop=1)
             .tones("V")

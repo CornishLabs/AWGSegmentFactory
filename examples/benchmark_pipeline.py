@@ -22,30 +22,11 @@ from awgsegmentfactory.debug import (
 )
 
 
+from sequence_repo import recreate_mol_exp
+
+
 def build_demo_builder() -> AWGProgramBuilder:
-    b = (
-        AWGProgramBuilder()
-        .logical_channel("H")
-        .logical_channel("V")
-        .define("init_H", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
-        .define("init_V", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
-    )
-
-    b.segment("wait_start", mode="wait_trig")
-    b.tones("H").use_def("init_H")
-    b.tones("V").use_def("init_V")
-    b.hold(time=200e-6)
-
-    b.segment("chirp_H", mode="once")
-    b.tones("H").move(df=+2e6, time=50e-6, idxs=[0], kind="linear")
-
-    b.segment("steady", mode="loop_n", loop=10)
-    b.hold(time=200e-6)
-
-    b.segment("wait_again", mode="wait_trig")
-    b.hold(time=200e-6)
-
-    return b
+    return recreate_mol_exp()
 
 
 def main() -> None:

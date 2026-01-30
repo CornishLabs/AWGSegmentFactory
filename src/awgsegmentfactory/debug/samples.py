@@ -422,7 +422,6 @@ def sequence_samples_debug(
 
             ax_f.set_ylabel(f"CH{ch} freq ({freq_unit})")
             ax_a.set_ylabel(f"CH{ch} amp")
-            ax_a.set_ylim(-0.05, 1.05)
             ax_f.grid(True, alpha=0.25)
             ax_a.grid(True, alpha=0.25)
             if row == 0:
@@ -616,6 +615,15 @@ def sequence_samples_debug(
                         else:
                             m = 0.05 * (hi - lo)
                         ax_f.set_ylim(lo - m, hi + m)
+
+                    finite_a = amps_w[np.isfinite(amps_w)]
+                    if finite_a.size:
+                        lo = float(np.min(finite_a))
+                        hi = float(np.max(finite_a))
+                        m = 0.05 * max(abs(lo), abs(hi))
+                        if m == 0.0:
+                            m = 0.05
+                        ax_a.set_ylim(lo - m, hi + m)
         finally:
             updating = False
 

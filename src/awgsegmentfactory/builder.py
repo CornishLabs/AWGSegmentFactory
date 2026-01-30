@@ -5,6 +5,7 @@ The builder is the user-facing API. It records operations into a continuous-time
 """
 
 from __future__ import annotations
+import math
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from .intent_ir import (
@@ -19,6 +20,7 @@ from .intent_ir import (
     UseDefOp,
     AddToneOp,
     RemoveTonesOp,
+    ParallelOp,
     MoveOp,
     RampAmpToOp,
     RemapFromDefOp,
@@ -223,6 +225,29 @@ class LogicalChannelView:
         return self._b.build_timeline(sample_rate_hz=sample_rate_hz)
 
 
+class _ParallelBlockBuilder:
+    """Internal helper for building a `ParallelOp`."""
+
+    def __init__(self, parent: "AWGProgramBuilder"):
+        self._parent = parent
+        self._definitions = parent._definitions
+        self._ops: list[Any] = []
+
+    def tones(self, logical_channel: str) -> LogicalChannelView:
+        if logical_channel not in self._parent._logical_channels:
+            raise KeyError(f"Unknown logical_channel {logical_channel!r}")
+        return LogicalChannelView(self, logical_channel)
+
+    def segment(self, *args, **kwargs):  # pragma: no cover
+        raise RuntimeError("parallel: cannot start a new segment inside a parallel block")
+
+    def hold(self, *args, **kwargs):  # pragma: no cover
+        raise RuntimeError("parallel: use .hold(...) outside the parallel block")
+
+    def _append(self, op) -> None:
+        self._ops.append(op)
+
+
 class AWGProgramBuilder:
     """
     Fluent front-end for building an AWG program.
@@ -345,6 +370,47 @@ class AWGProgramBuilder:
                 time_s=float(time),
             )
         )
+        return self
+
+    def parallel(self, fn) -> "AWGProgramBuilder":
+        """
+        Collect per-channel ops and run them concurrently as one time-interval.
+
+        The function receives a restricted builder that supports `.tones(...).move(...)`,
+        `.tones(...).ramp_amp_to(...)`, and `.tones(...).remap_from_def(...)`.
+        """
+        if self._current_seg is None:
+            raise RuntimeError("Call .segment(...) before .parallel(...)")
+
+        block = _ParallelBlockBuilder(self)
+        fn(block)
+        if not block._ops:
+            raise ValueError("parallel: no ops recorded")
+
+        timed_ops: list[Any] = []
+        for op in block._ops:
+            if isinstance(op, (MoveOp, RampAmpToOp, RemapFromDefOp)) and op.time_s > 0:
+                timed_ops.append(op)
+            else:
+                self._append(op)
+
+        if not timed_ops:
+            return self
+
+        time_s = float(timed_ops[0].time_s)
+        for op in timed_ops[1:]:
+            if not math.isclose(float(op.time_s), time_s, rel_tol=0.0, abs_tol=0.0):
+                raise ValueError("parallel: all timed ops must have the same time=...")
+
+        logical_channels: set[str] = set()
+        for op in timed_ops:
+            if op.logical_channel in logical_channels:
+                raise ValueError(
+                    f"parallel: multiple timed ops for logical_channel {op.logical_channel!r}"
+                )
+            logical_channels.add(op.logical_channel)
+
+        self._append(ParallelOp(time_s=time_s, ops=tuple(timed_ops)))
         return self
 
     def _append(self, op) -> None:

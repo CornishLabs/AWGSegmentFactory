@@ -116,6 +116,14 @@ class RemoveTonesOp(Op):
 
 
 @dataclass(frozen=True)
+class ParallelOp(Op):
+    """Run multiple per-logical-channel ops concurrently over `time_s`."""
+
+    time_s: float
+    ops: Tuple["Op", ...]
+
+
+@dataclass(frozen=True)
 class MoveOp(Op):
     """Add `df_hz` to selected tone frequencies over `time_s` using `interp`."""
 
