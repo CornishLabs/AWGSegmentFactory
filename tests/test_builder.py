@@ -151,11 +151,11 @@ class TestBuilder(unittest.TestCase):
             .tones("V")
             .use_def("v0")
             .hold(time=0.1)
-            .segment("s_add", mode="once", phase_mode="fixed")
+            .segment("s_add", mode="once", phase_mode="manual")
             .tones("V")
             .add_tone(f=200.0)
             .ramp_amp_to(amps=1.0, idxs=[1], time=0.1)
-            .segment("s_remove", mode="once", phase_mode="fixed")
+            .segment("s_remove", mode="once", phase_mode="manual")
             .tones("V")
             .remove_tones(idxs=[1])
             .hold(time=0.1)
@@ -163,7 +163,7 @@ class TestBuilder(unittest.TestCase):
 
         ir = b.build_resolved_ir(sample_rate_hz=fs)
         seg_add = next(s for s in ir.segments if s.name == "s_add")
-        self.assertEqual(seg_add.phase_mode, "fixed")
+        self.assertEqual(seg_add.phase_mode, "manual")
         self.assertEqual(len(seg_add.parts), 1)
         v_part = seg_add.parts[0].logical_channels["V"]
         self.assertEqual(v_part.start.freqs_hz.shape, (2,))

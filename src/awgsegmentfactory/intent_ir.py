@@ -12,7 +12,7 @@ from typing import Dict, NewType, Optional, Tuple, Literal
 
 SegmentMode = Literal["loop_n", "wait_trig"]
 InterpKind = Literal["hold", "linear", "exp", "min_jerk", "geo_ramp", "adiabatic_ramp"]
-SegmentPhaseMode = Literal["carry", "fixed"]
+SegmentPhaseMode = Literal["manual", "continue", "optimise"]
 
 ToneId = NewType("ToneId", int)
 
@@ -69,7 +69,7 @@ class IntentSegment:
     mode: SegmentMode
     loop: int  # for loop_n. For wait_trig set loop=1.
     ops: Tuple["Op", ...]
-    phase_mode: SegmentPhaseMode = "carry"
+    phase_mode: SegmentPhaseMode = "continue"
 
 
 # ---- Ops ----

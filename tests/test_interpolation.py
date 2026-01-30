@@ -71,7 +71,7 @@ class TestInterpolation(unittest.TestCase):
                     },
                 ),
             ),
-            phase_mode="carry",
+            phase_mode="continue",
         )
         ir = ResolvedIR(
             sample_rate_hz=fs,

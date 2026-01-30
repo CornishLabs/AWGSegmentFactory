@@ -197,7 +197,7 @@ class LogicalChannelView:
         mode: SegmentModeArg = "once",
         loop: Optional[int] = None,
         *,
-        phase_mode: SegmentPhaseMode = "carry",
+        phase_mode: SegmentPhaseMode | str = "continue",
     ) -> "AWGProgramBuilder":
         """Start a new segment and return the builder for further chaining."""
         return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
@@ -320,7 +320,7 @@ class AWGProgramBuilder:
         mode: SegmentModeArg = "once",
         loop: Optional[int] = None,
         *,
-        phase_mode: SegmentPhaseMode = "carry",
+        phase_mode: SegmentPhaseMode | str = "continue",
     ) -> "AWGProgramBuilder":
         """Start a new segment; subsequent ops are appended to this segment."""
         mode_s = str(mode)
@@ -338,8 +338,19 @@ class AWGProgramBuilder:
         else:
             raise ValueError(f"Unknown mode {mode_s!r}")
 
-        if phase_mode not in ("carry", "fixed"):
-            raise ValueError(f"Unknown phase_mode {phase_mode!r}")
+        phase_mode_s = str(phase_mode)
+        # Backwards-compatibility: keep accepting the old names.
+        if phase_mode_s == "carry":
+            phase_mode_s = "continue"
+        elif phase_mode_s == "fixed":
+            phase_mode_s = "manual"
+        elif phase_mode_s == "optimize":
+            phase_mode_s = "optimise"
+        if phase_mode_s not in ("manual", "continue", "optimise"):
+            raise ValueError(
+                "phase_mode must be one of 'manual', 'continue', 'optimise' "
+                "(aliases: 'fixed'->'manual', 'carry'->'continue', 'optimize'->'optimise')"
+            )
 
         self._segments.append(
             IntentSegment(
@@ -347,7 +358,7 @@ class AWGProgramBuilder:
                 mode=resolved_mode,
                 loop=int(loop),
                 ops=tuple(),
-                phase_mode=phase_mode,
+                phase_mode=phase_mode_s,  # type: ignore[arg-type]
             )
         )
         self._current_seg = len(self._segments) - 1

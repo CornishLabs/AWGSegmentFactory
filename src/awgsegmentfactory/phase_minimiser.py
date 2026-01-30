@@ -66,8 +66,6 @@ class MultisineBasis:
             raise ValueError("freqs_hz and amps must have the same length")
         if not np.all(np.isfinite(t)) or not np.all(np.isfinite(f)) or not np.all(np.isfinite(a)):
             raise ValueError("t_s, freqs_hz, and amps must be finite")
-        if np.all(a == 0.0):
-            raise ValueError("amps must not be all zeros")
 
         wt = (2.0 * np.pi) * t[:, None] * f[None, :]
         return cls(
@@ -135,6 +133,8 @@ def minimise_crest_factor_phases(
     xatol_rad: float = 1e-3,
     method: Literal["schroeder", "coordinate"] = "coordinate",
     output: Literal["rad", "deg"] = "rad",
+    phases_init_rad: Optional[Sequence[float]] = None,
+    fixed_mask: Optional[Sequence[bool]] = None,
 ) -> npt.NDArray[np.floating]:
     """
     Choose phases that reduce crest factor for a multitone waveform.
@@ -156,6 +156,11 @@ def minimise_crest_factor_phases(
         - "coordinate": coordinate-descent refinement (optimise each phase in turn).
     output:
         Return phases in radians ("rad") or degrees ("deg").
+    phases_init_rad:
+        Optional initial phases (radians). If omitted, uses a Schroeder-style seed.
+    fixed_mask:
+        Optional boolean mask of tones to keep fixed (True = fixed). Useful for
+        "carry some phases, optimise the rest" workflows.
     """
     f = np.asarray(freqs_hz, dtype=float).reshape(-1)
     a = np.asarray(amps, dtype=float).reshape(-1)
@@ -163,6 +168,7 @@ def minimise_crest_factor_phases(
         raise ValueError("freqs_hz must be non-empty")
     if f.shape != a.shape:
         raise ValueError("freqs_hz and amps must have the same length")
+    n_tones = int(f.shape[0])
 
     if t_s is None:
         if sample_rate_hz is None:
@@ -175,15 +181,37 @@ def minimise_crest_factor_phases(
             raise ValueError("n_samples must be > 0")
         t_s = np.arange(n, dtype=float) / fs
 
-    basis = MultisineBasis.from_tones(t_s=t_s, freqs_hz=f, amps=a)
-    phases = schroeder_phases_rad(basis.n_tones).astype(float, copy=True)
+    if phases_init_rad is None:
+        phases = schroeder_phases_rad(n_tones).astype(float, copy=True)
+    else:
+        phases = np.asarray(phases_init_rad, dtype=float).reshape(-1).copy()
+        if phases.shape != (n_tones,):
+            raise ValueError(
+                f"phases_init_rad must have shape ({n_tones},), got {phases.shape}"
+            )
 
-    if method == "schroeder" or passes <= 0 or basis.n_tones == 1:
+    if fixed_mask is None:
+        fixed = np.zeros((n_tones,), dtype=bool)
+    else:
+        fixed = np.asarray(fixed_mask, dtype=bool).reshape(-1)
+        if fixed.shape != (n_tones,):
+            raise ValueError(
+                f"fixed_mask must have shape ({n_tones},), got {fixed.shape}"
+            )
+
+    if (
+        method == "schroeder"
+        or passes <= 0
+        or n_tones == 1
+        or np.all(fixed)
+        or np.all(a == 0.0)
+    ):
         out = phases
         return np.rad2deg(out) if output == "deg" else out
     if method != "coordinate":
         raise ValueError("method must be 'schroeder' or 'coordinate'")
 
+    basis = MultisineBasis.from_tones(t_s=t_s, freqs_hz=f, amps=a)
     try:
         from scipy.optimize import minimize_scalar  # type: ignore
     except Exception as exc:  # pragma: no cover
@@ -199,9 +227,13 @@ def minimise_crest_factor_phases(
 
     for _ in range(int(passes)):
         for k in range(basis.n_tones):
+            if bool(fixed[k]):
+                continue
             sin_col = basis.sin_wt[:, k]
             cos_col = basis.cos_wt[:, k]
             amp_k = float(basis.amps[k])
+            if amp_k == 0.0:
+                continue
 
             phi0 = float(phases[k])
             contrib0 = amp_k * (sin_col * np.cos(phi0) + cos_col * np.sin(phi0))
@@ -223,4 +255,3 @@ def minimise_crest_factor_phases(
 
     out = phases
     return np.rad2deg(out) if output == "deg" else out
-

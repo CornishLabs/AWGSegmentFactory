@@ -44,7 +44,7 @@ class ResolvedSegment:
     mode: SegmentMode
     loop: int
     parts: Tuple[ResolvedPart, ...]
-    phase_mode: SegmentPhaseMode = "carry"
+    phase_mode: SegmentPhaseMode = "continue"
 
     @property
     def n_samples(self) -> int:

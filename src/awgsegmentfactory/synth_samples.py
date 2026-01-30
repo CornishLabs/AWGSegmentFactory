@@ -13,6 +13,7 @@ import numpy as np
 
 from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 from .interpolation import interp_param
+from .phase_minimiser import minimise_crest_factor_phases
 from .quantize import QuantizedIR, SegmentQuantizationInfo
 from .types import ChannelMap
 
@@ -51,6 +52,106 @@ class CompiledSequenceProgram:
     segments: Tuple[CompiledSegment, ...]
     steps: Tuple[SequenceStep, ...]
     quantization: Tuple[SegmentQuantizationInfo, ...]
+
+
+@dataclass(frozen=True)
+class _PhaseCarryState:
+    """Per-logical-channel state needed to carry phases across segments."""
+
+    freqs_hz: np.ndarray  # (n_tones,) end-of-segment freqs
+    phases_rad: np.ndarray  # (n_tones,) end-of-segment phases
+
+
+def _match_tones_by_frequency(
+    prev_freqs_hz: np.ndarray,
+    cur_freqs_hz: np.ndarray,
+    *,
+    tol_hz: float = 1.0,
+) -> dict[int, int]:
+    """
+    Return a mapping {cur_idx -> prev_idx} by greedy nearest-frequency matching.
+
+    The intent is to carry phases across segments even if tone order changes.
+    """
+    prev = np.asarray(prev_freqs_hz, dtype=float).reshape(-1)
+    cur = np.asarray(cur_freqs_hz, dtype=float).reshape(-1)
+    if prev.size == 0 or cur.size == 0:
+        return {}
+
+    # Candidate pairs within tolerance.
+    d = np.abs(prev[:, None] - cur[None, :])
+    pairs = np.argwhere(d <= float(tol_hz))
+    if pairs.size == 0:
+        return {}
+
+    # Sort by smallest frequency difference.
+    diffs = d[pairs[:, 0], pairs[:, 1]]
+    order = np.argsort(diffs, kind="stable")
+
+    used_prev: set[int] = set()
+    used_cur: set[int] = set()
+    out: dict[int, int] = {}
+    for idx in order:
+        i_prev = int(pairs[idx, 0])
+        i_cur = int(pairs[idx, 1])
+        if i_prev in used_prev or i_cur in used_cur:
+            continue
+        used_prev.add(i_prev)
+        used_cur.add(i_cur)
+        out[i_cur] = i_prev
+    return out
+
+
+def _default_crest_time_grid_s(
+    freqs_hz: np.ndarray,
+    *,
+    samples_per_period: int = 8,
+    min_duration_s: float = 0.5e-6,
+    max_duration_s: float = 5.0e-6,
+) -> np.ndarray:
+    """Pick a deterministic time grid for crest-factor optimisation."""
+    f = np.asarray(freqs_hz, dtype=float).reshape(-1)
+    if f.size == 0:
+        return np.zeros((1,), dtype=float)
+
+    f_sorted = np.sort(np.abs(f))
+    diffs = np.diff(f_sorted)
+    diffs = diffs[diffs > 0]
+    if diffs.size == 0:
+        duration_s = float(min_duration_s)
+    else:
+        duration_s = float(1.0 / float(np.min(diffs)))
+        duration_s = float(np.clip(duration_s, min_duration_s, max_duration_s))
+
+    f_max = float(np.max(f_sorted))
+    fs_eval = float(samples_per_period) * f_max if f_max > 0 else float(1.0 / duration_s)
+    n = int(np.ceil(duration_s * fs_eval))
+    n = max(n, 16)
+    return np.arange(n, dtype=float) / fs_eval
+
+
+def _optimise_phases_for_crest(
+    *,
+    freqs_hz: np.ndarray,
+    amps: np.ndarray,
+    phases_init_rad: Optional[np.ndarray] = None,
+    fixed_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Phase-only crest-factor optimisation with internal default grid selection."""
+    t_s = _default_crest_time_grid_s(freqs_hz)
+    return np.asarray(
+        minimise_crest_factor_phases(
+            freqs_hz,
+            amps,
+            t_s=t_s,
+            passes=1,
+            method="coordinate",
+            output="rad",
+            phases_init_rad=phases_init_rad,
+            fixed_mask=fixed_mask,
+        ),
+        dtype=float,
+    )
 
 
 def _interp_logical_channel_part(
@@ -120,7 +221,7 @@ def _synth_part(
 
     Returns (y, phase_end) where:
     - y is (n_samples,) float waveform
-    - phase_end is (n_tones,) phase at the end of the part (for carry)
+    - phase_end is (n_tones,) phase at the end of the part (for continue)
     """
     freqs, amps = _interp_logical_channel_part(
         pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz, xp=xp
@@ -149,27 +250,60 @@ def _synth_logical_channel_segment(
     *,
     logical_channel: str,
     sample_rate_hz: float,
-    phase_in: Optional[Any],
+    phase_in: Optional[_PhaseCarryState],
     xp: Any = np,
 ) -> tuple[Any, Any]:
-    """Synthesize one logical channel's waveform for a full segment (with optional phase carry)."""
+    """Synthesize one logical channel's waveform for a full segment."""
     if not seg.parts:
         return xp.zeros((0,), dtype=float), xp.zeros((0,), dtype=float)
 
     first = seg.parts[0].logical_channels[logical_channel]
     n_tones = int(first.start.freqs_hz.shape[0])
 
-    if seg.phase_mode == "carry":
-        if phase_in is None:
-            phase = xp.asarray(first.start.phases_rad).copy()
-        else:
-            # Policy: phases zip by index. Extra current tones start at their declared
-            # start phase (defaults to 0). Extra previous phases are dropped.
-            phase = xp.asarray(first.start.phases_rad).copy()
-            n_copy = min(int(phase_in.shape[0]), n_tones)
-            phase[:n_copy] = phase_in[:n_copy]
+    phase_mode = getattr(seg, "phase_mode", "continue")
+    # Backwards-compatibility for manually-constructed segments.
+    if phase_mode == "carry":
+        phase_mode = "continue"
+    elif phase_mode == "fixed":
+        phase_mode = "manual"
+    elif phase_mode == "optimize":
+        phase_mode = "optimise"
+    if phase_mode not in ("manual", "continue", "optimise"):
+        raise ValueError(f"Unknown phase_mode {phase_mode!r}")
+
+    start_phases = np.asarray(first.start.phases_rad, dtype=float).reshape(-1).copy()
+
+    if phase_mode == "manual":
+        phase0_np = start_phases
+    elif phase_mode == "optimise":
+        phase0_np = _optimise_phases_for_crest(
+            freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
+            amps=np.asarray(first.start.amps, dtype=float),
+        )
     else:
-        phase = xp.asarray(first.start.phases_rad).copy()
+        # phase_mode == "continue"
+        if phase_in is None:
+            phase0_np = start_phases
+        else:
+            mapping = _match_tones_by_frequency(
+                np.asarray(phase_in.freqs_hz, dtype=float),
+                np.asarray(first.start.freqs_hz, dtype=float),
+            )
+            fixed = np.zeros((n_tones,), dtype=bool)
+            for cur_i, prev_i in mapping.items():
+                start_phases[cur_i] = float(phase_in.phases_rad[prev_i])
+                fixed[cur_i] = True
+            if np.any(~fixed):
+                phase0_np = _optimise_phases_for_crest(
+                    freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
+                    amps=np.asarray(first.start.amps, dtype=float),
+                    phases_init_rad=start_phases,
+                    fixed_mask=fixed,
+                )
+            else:
+                phase0_np = start_phases
+
+    phase = xp.asarray(phase0_np).copy()
 
     ys: list[Any] = []
     for part in seg.parts:
@@ -305,7 +439,7 @@ def compile_sequence_program(
         xp = cp
 
     # Phase state carried across segments, per logical channel.
-    phase_state: dict[str, Any] = {}
+    phase_state: dict[str, _PhaseCarryState] = {}
 
     for i, seg in enumerate(q_ir.segments):
         n = seg.n_samples
@@ -324,7 +458,17 @@ def compile_sequence_program(
                 phase_in=phase_state.get(logical_channel),
                 xp=xp,
             )
-            phase_state[logical_channel] = phase_out
+            # Keep carry state on CPU; it is tiny compared to the waveform buffers.
+            if cp is not None:
+                phase_out_np = cp.asnumpy(phase_out)
+            else:
+                phase_out_np = np.asarray(phase_out, dtype=float)
+            end_freqs_np = np.asarray(
+                seg.parts[-1].logical_channels[logical_channel].end.freqs_hz, dtype=float
+            )
+            phase_state[logical_channel] = _PhaseCarryState(
+                freqs_hz=end_freqs_np, phases_rad=phase_out_np
+            )
 
             y = xp.clip(gain * y, -float(clip), float(clip))
             samp = xp.rint(y * float(full_scale)).astype(xp.int16)

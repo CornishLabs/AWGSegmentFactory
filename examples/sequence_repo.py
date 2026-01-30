@@ -146,7 +146,7 @@ def recreate_mol_exp():
                 time=1e-9
             )  # wait_trig defaults: snap_freqs=True, duration rounded to >=1 sample
         # 2) Loading tweezers on: wait for trigger then output steady tones
-        .segment("loading_tweezers_on", mode="wait_trig", phase_mode='fixed')
+        .segment("loading_tweezers_on", mode="wait_trig", phase_mode="optimise")
             .tones("H")
             .use_def("loading_H")
             .tones("V")
@@ -159,7 +159,7 @@ def recreate_mol_exp():
         # This is *not* a “move(df=...)” — it’s a remapping/re-targeting operation:
         # “Take selected existing tones, map them onto the target definition ordering,
         #  dropping extras, and tween over time with a chosen curve.”
-        .segment("hotswap_rearrange_to_exp_array", mode="loop_n", loop=1, phase_mode='fixed')
+        .segment("hotswap_rearrange_to_exp_array", mode="loop_n", loop=1, phase_mode="continue")
             .tones("H")
             .remap_from_def(
                 target_def="exp_H",
@@ -169,7 +169,7 @@ def recreate_mol_exp():
                 kind="min_jerk",
             )
         # 4) Equalise amps (H only)
-        .segment("equalise_amps", mode="loop_n", loop=1)
+        .segment("equalise_amps", mode="loop_n", loop=1, phase_mode="optimise")
             .tones("H")
             .ramp_amp_to(
                 amps=0.15*np.array([0.73, 0.68, 0.67, 0.75, 0.62, 0.81, 0.74, 0.73]),
@@ -184,7 +184,7 @@ def recreate_mol_exp():
             .tones("V")
             .move(df=-2e6, time=1e-3, idxs=[0])  # idxs defaults to "all" if omitted
         # 8) Ramp off (both logical channels)
-        .segment("ramp_off", mode="loop_n", loop=1)
+        .segment("ramp_off", mode="loop_n", loop=1, phase_mode="optimise")
             .parallel(
                 lambda p: p.tones("H")
                 .ramp_amp_to(amps=0.0, time=2e-3, kind="adiabatic_ramp")
@@ -207,19 +207,19 @@ def recreate_mol_exp():
             .tones("V")
             .move(df=(-0.1e6), time=0, idxs=[0])
             .move(df=(-1.9e6), time=2e-3, idxs=[0])
-        .segment("wait_for_pullback", mode="wait_trig")
+        .segment("wait_for_pullback", mode="wait_trig", phase_mode="optimise")
             .hold(time=40e-6)
         # 12)
-        .segment("turn_on_detect", mode="loop_n", loop=1, phase_mode="fixed")
+        .segment("turn_on_detect", mode="loop_n", loop=1, phase_mode="continue")
             .tones("V")
             .add_tone(f=98.2e6)  # defaults: amp=0.0, phase=0.0
             .ramp_amp_to(idxs=[1], amps=0.4, time=2e-3, kind="adiabatic_ramp")
         # 13) Move back (V only)
-        .segment("move_down", mode="loop_n", loop=1)
+        .segment("move_down", mode="loop_n", loop=1, phase_mode="optimise")
             .tones("V")
             .move(df=(+2e6), time=2e-3, idxs=[1])
         # 14) Final wait
-        .segment("wait_for_trigger_D", mode="wait_trig")
+        .segment("wait_for_trigger_D", mode="wait_trig", phase_mode="optimise")
             .hold(time=40e-6)
     )
 
