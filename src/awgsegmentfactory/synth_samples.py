@@ -55,8 +55,8 @@ class CompiledSequenceProgram:
 
 
 @dataclass(frozen=True)
-class _PhaseCarryState:
-    """Per-logical-channel state needed to carry phases across segments."""
+class _PhaseContinueState:
+    """Per-logical-channel state needed to continue phases across segments."""
 
     freqs_hz: np.ndarray  # (n_tones,) end-of-segment freqs
     phases_rad: np.ndarray  # (n_tones,) end-of-segment phases
@@ -71,7 +71,7 @@ def _match_tones_by_frequency(
     """
     Return a mapping {cur_idx -> prev_idx} by greedy nearest-frequency matching.
 
-    The intent is to carry phases across segments even if tone order changes.
+    The intent is to continue phases across segments even if tone order changes.
     """
     prev = np.asarray(prev_freqs_hz, dtype=float).reshape(-1)
     cur = np.asarray(cur_freqs_hz, dtype=float).reshape(-1)
@@ -250,7 +250,7 @@ def _synth_logical_channel_segment(
     *,
     logical_channel: str,
     sample_rate_hz: float,
-    phase_in: Optional[_PhaseCarryState],
+    phase_in: Optional[_PhaseContinueState],
     xp: Any = np,
 ) -> tuple[Any, Any]:
     """Synthesize one logical channel's waveform for a full segment."""
@@ -260,20 +260,15 @@ def _synth_logical_channel_segment(
     first = seg.parts[0].logical_channels[logical_channel]
     n_tones = int(first.start.freqs_hz.shape[0])
 
-    phase_mode = getattr(seg, "phase_mode", "continue")
-    # Backwards-compatibility for manually-constructed segments.
-    if phase_mode == "carry":
-        phase_mode = "continue"
-    elif phase_mode == "fixed":
-        phase_mode = "manual"
-    elif phase_mode == "optimize":
-        phase_mode = "optimise"
+    phase_mode = str(getattr(seg, "phase_mode", "continue"))
     if phase_mode not in ("manual", "continue", "optimise"):
         raise ValueError(f"Unknown phase_mode {phase_mode!r}")
 
     start_phases = np.asarray(first.start.phases_rad, dtype=float).reshape(-1).copy()
 
-    if phase_mode == "manual":
+    if n_tones == 0:
+        phase0_np = start_phases
+    elif phase_mode == "manual":
         phase0_np = start_phases
     elif phase_mode == "optimise":
         phase0_np = _optimise_phases_for_crest(
@@ -403,6 +398,11 @@ def compile_sequence_program(
       - `output="cupy"`: keeps int16 buffers on the GPU as CuPy arrays (no device->host copy).
 
     Note: resolve/quantize stages are still CPU/NumPy.
+
+    Phase modes:
+    - Each segment has `phase_mode in {"manual","continue","optimise"}`.
+    - `"continue"`/`"optimise"` may run a small CPU-side crest-factor phase optimiser
+      before synthesis. This is independent of `gpu=True` (the optimiser itself is CPU).
     """
     if gain <= 0:
         raise ValueError("gain must be > 0")
@@ -439,7 +439,7 @@ def compile_sequence_program(
         xp = cp
 
     # Phase state carried across segments, per logical channel.
-    phase_state: dict[str, _PhaseCarryState] = {}
+    phase_state: dict[str, _PhaseContinueState] = {}
 
     for i, seg in enumerate(q_ir.segments):
         n = seg.n_samples
@@ -458,7 +458,7 @@ def compile_sequence_program(
                 phase_in=phase_state.get(logical_channel),
                 xp=xp,
             )
-            # Keep carry state on CPU; it is tiny compared to the waveform buffers.
+            # Keep continue state on CPU; it is tiny compared to the waveform buffers.
             if cp is not None:
                 phase_out_np = cp.asnumpy(phase_out)
             else:
@@ -466,7 +466,7 @@ def compile_sequence_program(
             end_freqs_np = np.asarray(
                 seg.parts[-1].logical_channels[logical_channel].end.freqs_hz, dtype=float
             )
-            phase_state[logical_channel] = _PhaseCarryState(
+            phase_state[logical_channel] = _PhaseContinueState(
                 freqs_hz=end_freqs_np, phases_rad=phase_out_np
             )
 

@@ -160,7 +160,7 @@ def minimise_crest_factor_phases(
         Optional initial phases (radians). If omitted, uses a Schroeder-style seed.
     fixed_mask:
         Optional boolean mask of tones to keep fixed (True = fixed). Useful for
-        "carry some phases, optimise the rest" workflows.
+        "continue some phases, optimise the rest" workflows.
     """
     f = np.asarray(freqs_hz, dtype=float).reshape(-1)
     a = np.asarray(amps, dtype=float).reshape(-1)

@@ -88,6 +88,21 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 See `examples/benchmark_pipeline.py --gpu`.
 
+### Phase modes (optional)
+
+Each segment can set `phase_mode` to control how the *start phases* are chosen:
+
+- `manual`: use the phases stored in the IR (from `.define(..., phases=[...])`, `.add_tone(phase=...)`, etc.).
+- `optimise`: choose start phases to reduce crest factor based on the segment's start freqs/amps.
+- `continue`: continue phases across segment boundaries for tones whose frequencies match, and optimise
+  any new/unmatched tones while keeping continued tones fixed.
+
+Notes:
+- `phase_mode` is applied during `compile_sequence_program(...)` (sample synthesis). The debug
+  timeline `ResolvedIR.to_timeline()` shows pre-optimised phases.
+- `.define(..., phases="auto")` currently means "all zeros"; this is typically fine when using
+  `phase_mode="optimise"`/`"continue"`.
+
 ### 3) Debug helpers (optional)
 
 Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency group
@@ -155,5 +170,6 @@ Interpretation of the quantized IR to produce samples is done by `compile_sequen
 
 ## Notes / current limitations
 
-- `phases="auto"` is currently a placeholder (phases default to 0).
+- `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
+  crest-optimised/continued phases during compilation.
 - Calibration objects are stored on `IntentIR.calibrations` but not yet consumed by ops.

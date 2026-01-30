@@ -38,7 +38,13 @@ class ResolvedPart:
 
 @dataclass(frozen=True)
 class ResolvedSegment:
-    """A resolved segment: a list of integer-sample parts plus sequence metadata."""
+    """
+    A resolved segment: a list of integer-sample parts plus sequence metadata.
+
+    `phase_mode` is carried through resolve/quantize, but is applied during sample
+    synthesis (`compile_sequence_program(...)`). The debug timeline view
+    (`ResolvedIR.to_timeline()`) shows the pre-optimised phases stored in the IR.
+    """
 
     name: str
     mode: SegmentMode

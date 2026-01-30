@@ -30,8 +30,12 @@ from .resolve import resolve_intent_ir
 
 
 def _phases_auto(n: int) -> Tuple[float, ...]:
-    """Placeholder phase picker used by `AWGProgramBuilder.define(phases="auto")`."""
-    # placeholder: you can later implement phase picking for cresting, etc.
+    """
+    Default phase picker used by `AWGProgramBuilder.define(phases="auto")`.
+
+    Currently returns all zeros. If a segment uses `phase_mode="optimise"` or
+    `phase_mode="continue"`, start phases may be overridden during sample synthesis.
+    """
     return tuple(0.0 for _ in range(n))
 
 
@@ -197,7 +201,7 @@ class LogicalChannelView:
         mode: SegmentModeArg = "once",
         loop: Optional[int] = None,
         *,
-        phase_mode: SegmentPhaseMode | str = "continue",
+        phase_mode: SegmentPhaseMode = "continue",
     ) -> "AWGProgramBuilder":
         """Start a new segment and return the builder for further chaining."""
         return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
@@ -288,7 +292,14 @@ class AWGProgramBuilder:
         amps: Sequence[float],
         phases: str | Sequence[float] = "auto",
     ) -> "AWGProgramBuilder":
-        """Define a named tone-bank state used later by `.use_def(...)`."""
+        """
+        Define a named tone-bank state used later by `.use_def(...)`.
+
+        Notes:
+        - `phases="auto"` currently means all phases are set to 0.
+        - These phases are used directly when a segment uses `phase_mode="manual"`.
+          Other phase modes may override start phases during compilation.
+        """
         if logical_channel not in self._logical_channels:
             raise ValueError(
                 f"Define references unknown logical_channel {logical_channel!r}. "
@@ -320,9 +331,20 @@ class AWGProgramBuilder:
         mode: SegmentModeArg = "once",
         loop: Optional[int] = None,
         *,
-        phase_mode: SegmentPhaseMode | str = "continue",
+        phase_mode: SegmentPhaseMode = "continue",
     ) -> "AWGProgramBuilder":
-        """Start a new segment; subsequent ops are appended to this segment."""
+        """
+        Start a new segment; subsequent ops are appended to this segment.
+
+        `phase_mode` controls how *start phases* are chosen during sample synthesis:
+        - `"manual"`: use the phases stored in the IR.
+        - `"optimise"`: crest-optimise all start phases from the segment's start freqs/amps.
+        - `"continue"`: continue matching tone phases from the previous segment (by frequency),
+          and crest-optimise any new/unmatched tones while keeping continued tones fixed.
+
+        Note: phase optimisation happens at compile time (`compile_sequence_program(...)`),
+        not in `ResolvedIR.to_timeline()`.
+        """
         mode_s = str(mode)
         resolved_mode: SegmentMode
         if mode_s == "once":
@@ -338,19 +360,8 @@ class AWGProgramBuilder:
         else:
             raise ValueError(f"Unknown mode {mode_s!r}")
 
-        phase_mode_s = str(phase_mode)
-        # Backwards-compatibility: keep accepting the old names.
-        if phase_mode_s == "carry":
-            phase_mode_s = "continue"
-        elif phase_mode_s == "fixed":
-            phase_mode_s = "manual"
-        elif phase_mode_s == "optimize":
-            phase_mode_s = "optimise"
-        if phase_mode_s not in ("manual", "continue", "optimise"):
-            raise ValueError(
-                "phase_mode must be one of 'manual', 'continue', 'optimise' "
-                "(aliases: 'fixed'->'manual', 'carry'->'continue', 'optimize'->'optimise')"
-            )
+        if phase_mode not in ("manual", "continue", "optimise"):
+            raise ValueError("phase_mode must be one of 'manual', 'continue', 'optimise'")
 
         self._segments.append(
             IntentSegment(
@@ -358,7 +369,7 @@ class AWGProgramBuilder:
                 mode=resolved_mode,
                 loop=int(loop),
                 ops=tuple(),
-                phase_mode=phase_mode_s,  # type: ignore[arg-type]
+                phase_mode=phase_mode,
             )
         )
         self._current_seg = len(self._segments) - 1

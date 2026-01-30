@@ -127,7 +127,7 @@ def recreate_mol_exp():
         .define(
             "loading_H",
             logical_channel="H",
-            freqs=np.linspace(80.0e6, 120.0e6, 12),
+            freqs=np.linspace(92.0e6, 110.0e6, 12),
             amps=[0.08] * 12,
             phases="auto",
         )
@@ -135,7 +135,7 @@ def recreate_mol_exp():
         .define(
             "exp_H",
             logical_channel="H",
-            freqs=np.linspace(90.0e6, 110.0e6, 8),
+            freqs=np.linspace(94.0e6, 108.0e6, 8),
             amps=[0.08] * 8,
             phases="auto",
         )

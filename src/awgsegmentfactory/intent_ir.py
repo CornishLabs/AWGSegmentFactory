@@ -58,7 +58,9 @@ class IntentDefinition:
     logical_channel: str
     freqs_hz: Tuple[float, ...]
     amps: Tuple[float, ...]
-    phases_rad: Tuple[float, ...]  # keep, even if unused now
+    # Used when segment `phase_mode="manual"`. Other phase modes may override start phases
+    # during sample synthesis (compile time).
+    phases_rad: Tuple[float, ...]
 
 
 @dataclass(frozen=True)

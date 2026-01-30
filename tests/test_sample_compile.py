@@ -282,3 +282,49 @@ class TestSampleCompile(unittest.TestCase):
         # In manual mode, segment 1 uses its own declared start phase.
         expected_fixed = int(np.round(np.sin(1.234) * full_scale))
         self.assertEqual(int(prog_manual.segments[1].data_i16[0, 0]), expected_fixed)
+
+    def test_phase_mode_optimise_allows_empty_logical_channels(self) -> None:
+        fs = 1000.0
+        n = 96
+        empty = _empty_logical_channel_state()
+        st = LogicalChannelState(
+            freqs_hz=np.array([10.0], dtype=float),
+            amps=np.array([1.0], dtype=float),
+            phases_rad=np.array([0.0], dtype=float),
+        )
+        seg0 = ResolvedSegment(
+            name="s0",
+            mode="loop_n",
+            loop=1,
+            parts=(
+                ResolvedPart(
+                    n_samples=n,
+                    logical_channels={
+                        "H": ResolvedLogicalChannelPart(
+                            start=st, end=st, interp=InterpSpec("hold")
+                        ),
+                        "V": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "A": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "B": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                    },
+                ),
+            ),
+            phase_mode="optimise",
+        )
+        ir = ResolvedIR(
+            sample_rate_hz=fs,
+            logical_channels=("H", "V", "A", "B"),
+            segments=(seg0,),
+        )
+        q = quantize_resolved_ir(
+            ir,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
+        )
+        prog = compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000)
+        self.assertEqual(prog.segments[0].data_i16.shape, (4, n))
