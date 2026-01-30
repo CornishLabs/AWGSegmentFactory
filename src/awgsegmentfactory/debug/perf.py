@@ -32,6 +32,7 @@ def compile_builder_pipeline_timed(
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
+    gpu: bool = False,
 ) -> tuple[CompiledSequenceProgram, PipelineTimings]:
     """
     Compile end-to-end (Builder -> IntentIR -> ResolvedIR -> QuantizedIR -> samples),
@@ -51,7 +52,18 @@ def compile_builder_pipeline_timed(
         gain=gain,
         clip=clip,
         full_scale=full_scale,
+        gpu=gpu,
     )
+    if gpu:
+        # CuPy is asynchronous; ensure timings include queued GPU work.
+        try:  # pragma: no cover
+            import cupy as cp  # type: ignore
+
+            cp.cuda.Stream.null.synchronize()
+        except Exception:
+            # If CuPy isn't available here, compile_sequence_program(gpu=True) should
+            # already have failed; keep this as a best-effort sync.
+            pass
     t4 = perf_counter()
 
     return compiled, PipelineTimings(
@@ -73,6 +85,7 @@ def benchmark_builder_pipeline(
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
+    gpu: bool = False,
 ) -> tuple[PipelineTimings, ...]:
     """
     Run repeated end-to-end compiles, returning timings per iteration.
@@ -97,6 +110,7 @@ def benchmark_builder_pipeline(
             gain=gain,
             clip=clip,
             full_scale=full_scale,
+            gpu=gpu,
         )
         if i >= warmup:
             runs.append(timing)

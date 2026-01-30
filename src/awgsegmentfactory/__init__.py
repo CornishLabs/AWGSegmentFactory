@@ -10,7 +10,11 @@ from .calibration import LinearPositionToFreqCalib
 from .intent_ir import IntentIR
 from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
-from .synth_samples import CompiledSequenceProgram, compile_sequence_program
+from .synth_samples import (
+    CompiledSequenceProgram,
+    compile_sequence_program,
+    compiled_sequence_program_to_numpy,
+)
 from .quantize import (
     QuantizedIR,
     SegmentQuantizationInfo,
@@ -19,6 +23,7 @@ from .quantize import (
     quantum_samples,
 )
 from .types import ChannelMap
+from .upload import upload_sequence_program
 
 __all__ = [
     "AWGProgramBuilder",
@@ -29,6 +34,8 @@ __all__ = [
     "QuantizedIR",
     "CompiledSequenceProgram",
     "compile_sequence_program",
+    "compiled_sequence_program_to_numpy",
+    "upload_sequence_program",
     "SegmentQuantizationInfo",
     "format_samples_time",
     "quantize_resolved_ir",
