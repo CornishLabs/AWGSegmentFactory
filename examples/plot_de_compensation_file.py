@@ -54,6 +54,15 @@ Figure 2:
   - Left: a slice through `DE_RF_calibration` at the centre frequency (DE vs RF amp).
   - Right: a slice through `DE_RF_calibration` at the centre RF amp (DE vs frequency).
 
+Figure 3:
+  - Data/model/residual heatmaps for a simple analytic fit of `DE_RF_calibration`:
+      DE(freq, amp) ≈ g(freq) * (amp^2 / (amp^2 + u0(freq)))
+    where `g(freq)` is a 6th-order polynomial (in normalized frequency) and `u0(freq)` is a
+    frequency-dependent saturation parameter (also a 6th-order polynomial, enforced positive).
+
+Figure 4:
+  - Residual slices (data - fit) at the same centre (freq, amp) points as Figure 2.
+
 Usage:
   python examples/plot_de_compensation_file.py
   python examples/plot_de_compensation_file.py path/to/calFile.txt
@@ -158,32 +167,41 @@ def _plot_de_rf_slices(
     freqs_mhz: np.ndarray,
     amps_mV: np.ndarray,
     de: np.ndarray,
+    de_model: np.ndarray | None = None,
 ) -> tuple[float, float]:
     # Pick "centre of range" (midpoint of min/max) and snap to nearest grid points.
     f0 = float(freqs_mhz.min())
     f1 = float(freqs_mhz.max())
     a0 = float(amps_mV.min())
     a1 = float(amps_mV.max())
-    f_target = (0.75* f0 + 0.25*f1)
-    a_target = (0.25* a0 + 0.75*a1)
+    f_target = 0.5 * (f0 + f1)
+    a_target = 0.5 * (a0 + a1)
     i_f = int(np.argmin(np.abs(freqs_mhz - f_target)))
     i_a = int(np.argmin(np.abs(amps_mV - a_target)))
     f_sel = float(freqs_mhz[i_f])
     a_sel = float(amps_mV[i_a])
 
     # Slice along RF amplitude axis (hold frequency constant).
-    ax_amp.plot(amps_mV, de[i_f, :], lw=1.5)
+    ax_amp.plot(amps_mV, de[i_f, :], lw=1.5, label="data")
+    if de_model is not None:
+        ax_amp.plot(amps_mV, de_model[i_f, :], lw=1.5, ls="--", label="model")
     ax_amp.set_xlabel("RF amplitude (mV)")
     ax_amp.set_ylabel("Diffraction efficiency (arb)")
     ax_amp.set_title(f"DE vs RF amplitude @ {f_sel:.2f} MHz")
     ax_amp.grid(True, alpha=0.25)
+    if de_model is not None:
+        ax_amp.legend(loc="best")
 
     # Slice along frequency axis (hold RF amplitude constant).
-    ax_freq.plot(freqs_mhz, de[:, i_a], lw=1.5)
+    ax_freq.plot(freqs_mhz, de[:, i_a], lw=1.5, label="data")
+    if de_model is not None:
+        ax_freq.plot(freqs_mhz, de_model[:, i_a], lw=1.5, ls="--", label="model")
     ax_freq.set_xlabel("RF frequency (MHz)")
     ax_freq.set_ylabel("Diffraction efficiency (arb)")
     ax_freq.set_title(f"DE vs frequency @ {a_sel:.2f} mV")
     ax_freq.grid(True, alpha=0.25)
+    if de_model is not None:
+        ax_freq.legend(loc="best")
 
     return f_sel, a_sel
 
@@ -238,6 +256,305 @@ def _plot_power_cal(ax, power_cal: dict) -> None:
     plt.colorbar(tcf, ax=ax, label="RF amplitude (mV)")
 
 
+def _polyval_horner(coeffs_high_to_low: np.ndarray, x: np.ndarray) -> np.ndarray:
+    c = np.asarray(coeffs_high_to_low, dtype=float).reshape(-1)
+    if c.size == 0:
+        return np.zeros_like(x, dtype=float)
+    y = np.zeros_like(x, dtype=float) + float(c[0])
+    for cc in c[1:]:
+        y = y * x + float(cc)
+    return y
+
+
+def _fit_sat_poly_model(
+    *,
+    freqs_mhz: np.ndarray,
+    amps_mV: np.ndarray,
+    de: np.ndarray,
+    degree_g: int = 6,
+    degree_knee: int = 6,
+    clamp_de_nonnegative: bool = True,
+    min_u0_mV2: float = 1e-9,
+) -> dict[str, object]:
+    """
+    Fit:
+        DE(freq, amp) ≈ g(freq) * sat(amp^2; u0(freq))
+        sat(u; u0) = u / (u + u0)
+        g(freq) is a degree-`degree_g` polynomial in normalized frequency x ∈ [-1, 1].
+        u0(freq) is a degree-`degree_knee` polynomial in normalized frequency, squared to enforce u0>0.
+
+    Returns fit parameters plus convenience arrays for plotting.
+    """
+    if degree_g < 0:
+        raise ValueError("degree_g must be >= 0")
+    if degree_knee < 0:
+        raise ValueError("degree_knee must be >= 0")
+    if de.shape != (freqs_mhz.size, amps_mV.size):
+        raise ValueError("shape mismatch for freqs/amps/de")
+
+    min_u0 = float(min_u0_mV2)
+    if not np.isfinite(min_u0) or min_u0 <= 0:
+        raise ValueError("min_u0_mV2 must be finite and > 0")
+
+    de_raw = np.asarray(de, dtype=float)
+    if clamp_de_nonnegative:
+        de_used = np.clip(de_raw, 0.0, None)
+    else:
+        de_used = de_raw
+
+    # Normalize frequency to x ∈ [-1, 1] for a well-conditioned polynomial.
+    f_min = float(np.min(freqs_mhz))
+    f_max = float(np.max(freqs_mhz))
+    f_mid = 0.5 * (f_min + f_max)
+    f_halfspan = 0.5 * (f_max - f_min)
+    if not np.isfinite(f_halfspan) or f_halfspan <= 0:
+        raise ValueError("invalid frequency range for normalization")
+    x = (np.asarray(freqs_mhz, dtype=float) - f_mid) / f_halfspan
+
+    a = np.asarray(amps_mV, dtype=float).reshape(-1)
+    u = a * a
+    u_pos = u[u > 0]
+    if u_pos.size == 0:
+        raise ValueError("RF amplitude grid has no positive values")
+
+    # A useful scale for initializing the knee.
+    u_pos_min = float(np.min(u_pos))
+    u_pos_max = float(np.max(u_pos))
+
+    de_sq_sum = float(np.sum(de_used * de_used))
+
+    def _a0_and_u0_for_coeffs(coeffs_a0: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        a0 = _polyval_horner(np.asarray(coeffs_a0, dtype=float), x)
+        u0 = (a0 * a0) + min_u0
+        return a0, u0
+
+    def eval_for_coeffs_a0(
+        coeffs_a0: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+        a0, u0 = _a0_and_u0_for_coeffs(coeffs_a0)
+        if not np.all(np.isfinite(u0)):
+            return (
+                np.full((degree_g + 1,), np.nan),
+                np.full((degree_knee + 1,), np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                float("inf"),
+            )
+
+        # sat is per-frequency because u0 varies with freq.
+        sat = u[None, :] / (u[None, :] + u0[:, None])  # (n_freq, n_amp)
+        denom = np.sum(sat * sat, axis=1)  # (n_freq,)
+        # Avoid divide-by-zero: if denom is zero, sat is all-zero -> data must also be all-zero.
+        denom = np.maximum(denom, 1e-30)
+        dots = np.sum(de_used * sat, axis=1)  # (n_freq,)
+        g = dots / denom
+
+        # Polynomial fit for g(freq): coefficients high->low (np.polyfit convention).
+        coeffs_g = np.polyfit(x, g, deg=degree_g)
+        g_fit = _polyval_horner(coeffs_g, x)
+
+        # SSE computed without materializing the full (n_freq,n_amp) fit matrix:
+        # sum_j (de - g*sat)^2 = sum(de^2) - 2*g*dot + g^2*denom
+        sse = de_sq_sum - (2.0 * float(np.dot(g_fit, dots))) + float(np.dot((g_fit * g_fit), denom))
+        return (
+            np.asarray(coeffs_g, dtype=float),
+            np.asarray(coeffs_a0, dtype=float),
+            np.asarray(a0, dtype=float),
+            np.asarray(u0, dtype=float),
+            np.asarray(g_fit, dtype=float),
+            float(sse),
+        )
+
+    try:
+        from scipy.optimize import minimize, minimize_scalar  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("SciPy is required for fitting the analytic model") from exc
+
+    # Initialize:
+    # - If u0 is constant, solve the 1D problem for a strong initial guess.
+    # - Then use a frequency-dependent knee polynomial initialized to the same constant.
+    def _initial_u0_const() -> float:
+        lo = float(np.log10(u_pos_min * 1e-3))
+        hi = float(np.log10(u_pos_max * 1e3))
+
+        def objective(log_u0: float) -> float:
+            u0 = 10.0 ** float(log_u0)
+            # Reuse the general evaluator with a constant a0.
+            a0_const = float(np.sqrt(max(u0, min_u0)))
+            coeffs_a0 = np.zeros((degree_knee + 1,), dtype=float)
+            coeffs_a0[-1] = a0_const
+            _coeffs_g, _coeffs_a0, _a0, _u0, _g_fit, sse = eval_for_coeffs_a0(coeffs_a0)
+            return sse
+
+        opt = minimize_scalar(objective, bounds=(lo, hi), method="bounded")
+        return 10.0 ** float(opt.x)
+
+    u0_init = _initial_u0_const()
+    a0_init = float(np.sqrt(max(u0_init, min_u0)))
+    coeffs_a0_init = np.zeros((degree_knee + 1,), dtype=float)
+    coeffs_a0_init[-1] = a0_init
+
+    def objective_vec(coeffs_a0_flat: np.ndarray) -> float:
+        coeffs_a0 = np.asarray(coeffs_a0_flat, dtype=float).reshape(-1)
+        if coeffs_a0.shape != (degree_knee + 1,):
+            raise ValueError("internal shape mismatch for knee coefficients")
+        _coeffs_g, _coeffs_a0, _a0, _u0, _g_fit, sse = eval_for_coeffs_a0(coeffs_a0)
+        return float(sse)
+
+    opt = minimize(
+        objective_vec,
+        x0=coeffs_a0_init,
+        method="Powell",
+        options={"maxiter": 200, "xtol": 1e-4, "ftol": 1e-6},
+    )
+    coeffs_a0_best = np.asarray(opt.x, dtype=float)
+    coeffs_g, _coeffs_a0, a0_by_freq, u0_by_freq, g_fit, sse = eval_for_coeffs_a0(
+        coeffs_a0_best
+    )
+
+    # Build the fitted surface for residual plots.
+    sat = u[None, :] / (u[None, :] + u0_by_freq[:, None])
+    de_fit = g_fit[:, None] * sat
+
+    rmse = float(np.sqrt(np.mean((de_used - de_fit) ** 2)))
+    max_abs = float(np.max(np.abs(de_used - de_fit)))
+
+    return {
+        "degree_g": int(degree_g),
+        "degree_knee": int(degree_knee),
+        "min_u0_mV2": float(min_u0),
+        "u0_mV2_by_freq": u0_by_freq,
+        "a0_mV_by_freq": a0_by_freq,
+        "freq_mid_mhz": float(f_mid),
+        "freq_halfspan_mhz": float(f_halfspan),
+        "x": x,
+        "coeffs_g_high_to_low": np.asarray(coeffs_g, dtype=float),
+        "coeffs_a0_high_to_low": np.asarray(coeffs_a0_best, dtype=float),
+        "g_fit_by_freq": np.asarray(g_fit, dtype=float),
+        "sat_by_amp": np.asarray(sat, dtype=float),
+        "de_raw": de_raw,
+        "de_used": de_used,
+        "de_fit": np.asarray(de_fit, dtype=float),
+        "sse": float(sse),
+        "rmse": rmse,
+        "max_abs_resid": max_abs,
+        "opt_status": str(getattr(opt, "message", "")),
+        "opt_success": bool(getattr(opt, "success", False)),
+        "opt_nfev": int(getattr(opt, "nfev", -1)),
+    }
+
+
+def _plot_fit_and_residuals(
+    *,
+    freqs_mhz: np.ndarray,
+    amps_mV: np.ndarray,
+    fit: dict[str, object],
+):
+    import matplotlib.pyplot as plt
+
+    de_used = np.asarray(fit["de_used"], dtype=float)
+    de_fit = np.asarray(fit["de_fit"], dtype=float)
+    resid = de_used - de_fit
+
+    vmin = float(np.nanmin(de_used))
+    vmax = float(np.nanmax(de_used))
+    rmax = float(np.nanmax(np.abs(resid)))
+
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4.6), sharex=False, sharey=False)
+    ax0, ax1, ax2 = axs
+
+    pcm0 = ax0.pcolormesh(freqs_mhz, amps_mV, de_used.T, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    ax0.set_title("DE data (clipped >= 0)")
+    ax0.set_xlabel("RF frequency (MHz)")
+    ax0.set_ylabel("RF amplitude (mV)")
+    plt.colorbar(pcm0, ax=ax0, label="DE (arb)")
+
+    pcm1 = ax1.pcolormesh(freqs_mhz, amps_mV, de_fit.T, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+    ax1.set_title("Analytic fit")
+    ax1.set_xlabel("RF frequency (MHz)")
+    ax1.set_ylabel("RF amplitude (mV)")
+    plt.colorbar(pcm1, ax=ax1, label="DE (arb)")
+
+    pcm2 = ax2.pcolormesh(
+        freqs_mhz,
+        amps_mV,
+        resid.T,
+        shading="auto",
+        cmap="coolwarm",
+        vmin=-rmax,
+        vmax=rmax,
+    )
+    ax2.set_title("Residual (data - fit)")
+    ax2.set_xlabel("RF frequency (MHz)")
+    ax2.set_ylabel("RF amplitude (mV)")
+    plt.colorbar(pcm2, ax=ax2, label="Residual (arb)")
+
+    coeffs_g = np.asarray(fit["coeffs_g_high_to_low"], dtype=float)
+    coeffs_a0 = np.asarray(fit["coeffs_a0_high_to_low"], dtype=float)
+    a0_by_f = np.asarray(fit["a0_mV_by_freq"], dtype=float).reshape(-1)
+    u0_by_f = np.asarray(fit["u0_mV2_by_freq"], dtype=float).reshape(-1)
+    rmse = float(fit["rmse"])
+    max_abs = float(fit["max_abs_resid"])
+    fig.suptitle(
+        f"Fit: DE ≈ g(x) * (a²/(a²+u0(x)))   "
+        f"RMSE={rmse:.4g}, max|res|={max_abs:.4g}"
+    )
+    fig.tight_layout()
+
+    print("\n--- analytic fit (DE_RF_calibration) ---")
+    print("Model: DE(freq, a) = g(freq) * (a^2 / (a^2 + u0(freq)))")
+    print("  freq normalization: x = (f_MHz - mid)/halfspan")
+    print("  mid_MHz =", float(fit["freq_mid_mhz"]))
+    print("  halfspan_MHz =", float(fit["freq_halfspan_mhz"]))
+    print("  g(x) poly coeffs (high->low) =", coeffs_g.tolist())
+    print("  a0(x) poly coeffs (high->low) =", coeffs_a0.tolist())
+    print(
+        "  a0_mV range =",
+        (float(np.min(a0_by_f)), float(np.max(a0_by_f))),
+        " (u0_mV^2 range =",
+        (float(np.min(u0_by_f)), float(np.max(u0_by_f))),
+        ")",
+    )
+    print("  RMSE =", rmse)
+    print("  max|residual| =", max_abs)
+
+    return fig
+
+
+def _plot_residual_slices(
+    ax_amp,
+    ax_freq,
+    *,
+    freqs_mhz: np.ndarray,
+    amps_mV: np.ndarray,
+    resid: np.ndarray,
+    f_sel_mhz: float,
+    a_sel_mV: float,
+) -> None:
+    if resid.shape != (freqs_mhz.size, amps_mV.size):
+        raise ValueError("residual grid shape mismatch")
+
+    i_f = int(np.argmin(np.abs(freqs_mhz - float(f_sel_mhz))))
+    i_a = int(np.argmin(np.abs(amps_mV - float(a_sel_mV))))
+    f_sel = float(freqs_mhz[i_f])
+    a_sel = float(amps_mV[i_a])
+
+    ax_amp.plot(amps_mV, resid[i_f, :], lw=1.5)
+    ax_amp.axhline(0.0, color="k", lw=1.0, alpha=0.35)
+    ax_amp.set_xlabel("RF amplitude (mV)")
+    ax_amp.set_ylabel("Residual (arb)")
+    ax_amp.set_title(f"Residual vs RF amplitude @ {f_sel:.2f} MHz")
+    ax_amp.grid(True, alpha=0.25)
+
+    ax_freq.plot(freqs_mhz, resid[:, i_a], lw=1.5)
+    ax_freq.axhline(0.0, color="k", lw=1.0, alpha=0.35)
+    ax_freq.set_xlabel("RF frequency (MHz)")
+    ax_freq.set_ylabel("Residual (arb)")
+    ax_freq.set_title(f"Residual vs frequency @ {a_sel:.2f} mV")
+    ax_freq.grid(True, alpha=0.25)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -267,6 +584,8 @@ def main() -> None:
         )
 
     freqs_mhz, amps_mV, de = _de_rf_grid(de_rf)
+    fit = _fit_sat_poly_model(freqs_mhz=freqs_mhz, amps_mV=amps_mV, de=de, degree_g=6, degree_knee=6)
+    de_fit = np.asarray(fit["de_fit"], dtype=float)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13, 5), sharex=False, sharey=False)
     _plot_de_rf(ax0, freqs_mhz=freqs_mhz, amps_mV=amps_mV, de=de)
@@ -275,13 +594,36 @@ def main() -> None:
     fig.tight_layout()
 
     fig2, (ax2, ax3) = plt.subplots(1, 2, figsize=(13, 4), sharex=False, sharey=False)
-    f_sel, a_sel = _plot_de_rf_slices(ax2, ax3, freqs_mhz=freqs_mhz, amps_mV=amps_mV, de=de)
+    f_sel, a_sel = _plot_de_rf_slices(
+        ax2, ax3, freqs_mhz=freqs_mhz, amps_mV=amps_mV, de=de, de_model=de_fit
+    )
     fig2.suptitle(f"{path.name} (slices at centre of ranges: f={f_sel:.2f} MHz, a={a_sel:.2f} mV)")
     fig2.tight_layout()
 
     # Mark slice positions on the DE heatmap (figure 1, left axis).
     ax0.axvline(f_sel, color="w", lw=1.5, alpha=0.9)
     ax0.axhline(a_sel, color="w", lw=1.5, alpha=0.9)
+
+    fig3 = _plot_fit_and_residuals(freqs_mhz=freqs_mhz, amps_mV=amps_mV, fit=fit)
+    try:  # best-effort, backend-dependent
+        fig3.canvas.manager.set_window_title("DE_RF_calibration fit + residuals")
+    except Exception:
+        pass
+
+    de_used = np.asarray(fit["de_used"], dtype=float)
+    resid = de_used - de_fit
+    fig4, (ax4, ax5) = plt.subplots(1, 2, figsize=(13, 4), sharex=False, sharey=False)
+    _plot_residual_slices(
+        ax4,
+        ax5,
+        freqs_mhz=freqs_mhz,
+        amps_mV=amps_mV,
+        resid=resid,
+        f_sel_mhz=f_sel,
+        a_sel_mV=a_sel,
+    )
+    fig4.suptitle(f"{path.name} (residual slices at f={f_sel:.2f} MHz, a={a_sel:.2f} mV)")
+    fig4.tight_layout()
 
     plt.show()
 
