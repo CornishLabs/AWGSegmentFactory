@@ -7,7 +7,7 @@ sample buffer and render it with segment/repeat boundary markers for inspection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -159,6 +159,13 @@ def sequence_samples_debug(
     freq_unit: str = "MHz",
     max_points_wave: int = 20_000,
     max_points_param: int = 10_000,
+    show_spot_grid: bool = False,
+    spot_grid_logical_channel_h: str = "H",
+    spot_grid_logical_channel_v: str = "V",
+    spot_grid_fx: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    spot_grid_fy: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    spot_grid_size_fn: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
+    spot_grid_annotate: bool = False,
     title: str = "Sequence Samples Debug",
 ):
     """
@@ -171,14 +178,18 @@ def sequence_samples_debug(
       rendered on the same unrolled x-axis (including `wait_trig_loops` repeats).
     - Optional boundary slider (index into the boundary list) that re-centers the view.
     - Set `window_samples=None` to plot the entire unrolled sequence at once (no slider).
+    - Optional 2D spot-grid view (Cartesian product of H/V tones) derived from the same
+      quantized per-sample parameter traces. Click-drag on any time axis to scrub, or
+      use the Play button.
 
     Tip (Jupyter): `%matplotlib widget` for a nicer zoom/pan UI.
     """
     try:
         import matplotlib.pyplot as plt
         from matplotlib.collections import LineCollection
+        import matplotlib.colors as mcolors
         from matplotlib.gridspec import GridSpec
-        from matplotlib.widgets import Slider
+        from matplotlib.widgets import Button, Slider
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
             "`sequence_samples_debug` requires matplotlib. Install the `dev` dependency group."
@@ -209,9 +220,11 @@ def sequence_samples_debug(
             clip=clip,
             full_scale=full_scale,
         )
-    if show_param_traces and q_ir is None:
+    need_params = bool(show_param_traces) or bool(show_spot_grid)
+    if need_params and q_ir is None:
         raise ValueError(
-            "show_param_traces=True requires passing a ResolvedIR/QuantizedIR (not a CompiledSequenceProgram)"
+            "show_param_traces=True or show_spot_grid=True requires passing a ResolvedIR/QuantizedIR "
+            "(not a CompiledSequenceProgram)"
         )
 
     samples, instances = unroll_compiled_sequence_for_debug(
@@ -257,30 +270,41 @@ def sequence_samples_debug(
     if show_param_traces:
         n_param_channels = min(2, len(param_channels))
     n_param_axes = 2 * n_param_channels
+    n_grid_axes = 1 if show_spot_grid else 0
 
     # Vertical stack layout: frequency/amp traces (optional) above waveform channels,
     # all sharing the same x-axis.
-    fig = plt.figure(figsize=(14, 2.4 * max(1, n_param_channels) + 2.6 * n_wave))
+    fig_h = 2.4 * max(1, n_param_channels) + 2.6 * n_wave + (3.2 if show_spot_grid else 0.0)
+    fig = plt.figure(figsize=(14, fig_h))
+    try:  # pragma: no cover
+        fig.canvas.manager.set_window_title(str(title))
+    except Exception:
+        pass
     gs = GridSpec(
-        nrows=n_param_axes + n_wave,
+        nrows=n_grid_axes + n_param_axes + n_wave,
         ncols=1,
         figure=fig,
-        height_ratios=[1] * n_param_axes + [2] * n_wave,
+        height_ratios=([3] * n_grid_axes) + ([1] * n_param_axes) + ([2] * n_wave),
     )
 
-    ax_master = None
+    ax_grid = None
+    row = 0
+    if show_spot_grid:
+        ax_grid = fig.add_subplot(gs[row, 0])
+        row += 1
+
+    ax_time_master = None
     ax_param: list = []
     param_axes: list[tuple[int, object, object]] = []
-    row = 0
     if show_param_traces and n_param_channels > 0:
         for ch in param_channels[:n_param_channels]:
-            if ax_master is None:
+            if ax_time_master is None:
                 ax_f = fig.add_subplot(gs[row, 0])
-                ax_master = ax_f
+                ax_time_master = ax_f
             else:
-                ax_f = fig.add_subplot(gs[row, 0], sharex=ax_master)
+                ax_f = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
             row += 1
-            ax_a = fig.add_subplot(gs[row, 0], sharex=ax_master)
+            ax_a = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
             row += 1
             ax_param.extend([ax_f, ax_a])
             param_axes.append((int(ch), ax_f, ax_a))
@@ -288,11 +312,11 @@ def sequence_samples_debug(
     axs = []
     for i in range(n_wave):
         r = row + i
-        if ax_master is None:
+        if ax_time_master is None:
             ax = fig.add_subplot(gs[r, 0])
-            ax_master = ax
+            ax_time_master = ax
         else:
-            ax = fig.add_subplot(gs[r, 0], sharex=ax_master)
+            ax = fig.add_subplot(gs[r, 0], sharex=ax_time_master)
         axs.append(ax)
 
     # With shared x-axis, only show x tick labels on the bottom-most axis.
@@ -382,6 +406,13 @@ def sequence_samples_debug(
             raise ValueError("freq_unit must be one of: 'Hz', 'kHz', 'MHz', 'GHz'")
         f_scale = {"Hz": 1.0, "kHz": 1e-3, "MHz": 1e-6, "GHz": 1e-9}[freq_unit]
 
+        for idx, (ch, ax_f, ax_a) in enumerate(param_axes):
+            ax_f.set_ylabel(f"CH{ch} freq ({freq_unit})")
+            ax_a.set_ylabel(f"CH{ch} amp")
+            ax_f.grid(True, alpha=0.25)
+            ax_a.grid(True, alpha=0.25)
+
+    if need_params:
         def _param_logical_channel_for_hardware_channel(ch: int) -> Optional[str]:
             logical_channels = sorted(hw_ch_to_logical_channels.get(ch, []))
             return logical_channels[0] if logical_channels else None
@@ -428,29 +459,6 @@ def sequence_samples_debug(
                 cursor += part.n_samples
             segment_param_cache[key] = (freqs, amps)
             return freqs, amps
-
-        for idx, (ch, ax_f, ax_a) in enumerate(param_axes):
-            ax_f.set_ylabel(f"CH{ch} freq ({freq_unit})")
-            ax_a.set_ylabel(f"CH{ch} amp")
-            ax_f.grid(True, alpha=0.25)
-            ax_a.grid(True, alpha=0.25)
-            if idx == 0:
-                ax_f.set_title("Frequency vs time")
-                ax_a.set_title("Amplitude vs time")
-
-    def _boundary_label(i: int) -> str:
-        """Return a human-friendly label describing boundary `i` for the figure title."""
-        if not instances:
-            return title
-        cur = instances[i]
-        if i == 0:
-            return f"{title} | start: {cur.segment_name}"
-        prev = instances[i - 1]
-        if cur.is_wrap_preview:
-            return f"{title} | wrap: {prev.segment_name} -> {cur.segment_name}"
-        if prev.segment_index == cur.segment_index:
-            return f"{title} | loop: {cur.segment_name} ({cur.rep_index + 1}/{cur.reps_total})"
-        return f"{title} | seg: {prev.segment_name} -> {cur.segment_name}"
 
     # Fast boundary rendering: one LineCollection per axis for solid + dashed.
     boundary_solid: list[float] = []
@@ -546,6 +554,242 @@ def sequence_samples_debug(
             amps[mask, :] = seg_amps[offs, :]
         return freqs, amps
 
+    cursor_pos: int = 0
+    cursor_lines: list = []
+    spot_grid_enabled = bool(show_spot_grid and ax_grid is not None)
+    if spot_grid_enabled:
+        from .plot import LinearFreqToPos, default_size_fn, norm_total_amp_fn
+
+        if q_ir is None:  # pragma: no cover
+            raise RuntimeError("q_ir missing")
+        if spot_grid_logical_channel_h not in q_ir.logical_channels:
+            raise ValueError(
+                f"Unknown spot_grid_logical_channel_h={spot_grid_logical_channel_h!r}; "
+                f"available: {list(q_ir.logical_channels)}"
+            )
+        if spot_grid_logical_channel_v not in q_ir.logical_channels:
+            raise ValueError(
+                f"Unknown spot_grid_logical_channel_v={spot_grid_logical_channel_v!r}; "
+                f"available: {list(q_ir.logical_channels)}"
+            )
+
+        fx = spot_grid_fx or LinearFreqToPos(slope_hz_per_unit=1e6)
+        fy = spot_grid_fy or LinearFreqToPos(slope_hz_per_unit=1e6)
+        size_fn = spot_grid_size_fn or default_size_fn
+
+        def _axis_limits_for_logical_channel(
+            logical_channel: str, f_to_pos: Callable[[np.ndarray], np.ndarray]
+        ) -> tuple[float, float]:
+            freqs: list[np.ndarray] = []
+            for seg in q_ir.segments:
+                for part in seg.parts:
+                    pp = part.logical_channels[logical_channel]
+                    freqs.append(pp.start.freqs_hz)
+                    freqs.append(pp.end.freqs_hz)
+            if not freqs or not any(a.size for a in freqs):
+                return (-1.0, 1.0)
+            f = np.concatenate([a for a in freqs if a.size], axis=0)
+            x = f_to_pos(f)
+            xmin = float(np.min(x))
+            xmax = float(np.max(x))
+            if xmin == xmax:
+                m = 1.0 if xmin == 0.0 else abs(xmin) * 0.05
+            else:
+                m = 0.05 * (xmax - xmin)
+            return (xmin - m, xmax + m)
+
+        xlim_grid = _axis_limits_for_logical_channel(spot_grid_logical_channel_h, fx)
+        ylim_grid = _axis_limits_for_logical_channel(spot_grid_logical_channel_v, fy)
+
+        ax_grid.set_xlabel(f"{spot_grid_logical_channel_h} position (arb)")
+        ax_grid.set_ylabel(f"{spot_grid_logical_channel_v} position (arb)")
+        ax_grid.grid(True, alpha=0.3)
+        ax_grid.set_xlim(*xlim_grid)
+        ax_grid.set_ylim(*ylim_grid)
+        ax_grid.set_aspect("equal", adjustable="box")
+
+        spot_scatter = ax_grid.scatter(
+            np.zeros((0,), dtype=float),
+            np.zeros((0,), dtype=float),
+            s=np.zeros((0,), dtype=float),
+            marker="o",
+            linewidth=0,
+            edgecolor="none",
+        )
+        no_tones_text = ax_grid.text(
+            0.5,
+            0.5,
+            "No tones",
+            transform=ax_grid.transAxes,
+            ha="center",
+            va="center",
+            fontsize=12,
+            alpha=0.7,
+            visible=False,
+        )
+        spot_texts: list = []
+
+        def _render_spot_grid(sample_idx: int) -> None:
+            if ax_grid is None:
+                return
+            sample_idx = int(sample_idx)
+            sample_idx = max(0, min(sample_idx, total - 1))
+            x = np.array([sample_idx], dtype=int)
+            fH, aH = _params_at(spot_grid_logical_channel_h, x)
+            fV, aV = _params_at(spot_grid_logical_channel_v, x)
+            fH = fH[0]
+            aH = aH[0]
+            fV = fV[0]
+            aV = aV[0]
+
+            mH = np.isfinite(fH) & np.isfinite(aH)
+            mV = np.isfinite(fV) & np.isfinite(aV)
+            fH = fH[mH]
+            aH = aH[mH]
+            fV = fV[mV]
+            aV = aV[mV]
+
+            if fH.size == 0 or fV.size == 0:
+                no_tones_text.set_visible(True)
+                spot_scatter.set_visible(False)
+                for txt in spot_texts:
+                    txt.remove()
+                spot_texts.clear()
+                return
+
+            no_tones_text.set_visible(False)
+            spot_scatter.set_visible(True)
+
+            xH = fx(fH)
+            yV = fy(fV)
+            X = np.repeat(xH, len(yV))
+            Y = np.tile(yV, len(xH))
+            S = size_fn(aH, aV)
+            Alpha = norm_total_amp_fn(aH, aV)
+
+            rgba = mcolors.to_rgba_array("C0")
+            rgba = np.broadcast_to(rgba, (len(Alpha), 4)).copy()
+            rgba[:, 3] = np.clip(Alpha, 0.0, 1.0)
+            spot_scatter.set_offsets(np.column_stack([X, Y]))
+            spot_scatter.set_sizes(np.asarray(S, dtype=float).reshape(-1))
+            spot_scatter.set_facecolors(rgba)
+
+            if spot_grid_annotate:
+                for txt in spot_texts:
+                    txt.remove()
+                spot_texts.clear()
+                k = 0
+                for ii in range(len(xH)):
+                    for jj in range(len(yV)):
+                        spot_texts.append(
+                            ax_grid.text(X[k], Y[k], f"{ii},{jj}", fontsize=8)
+                        )
+                        k += 1
+            else:
+                for txt in spot_texts:
+                    txt.remove()
+                spot_texts.clear()
+
+        cursor_pos = boundary_positions[0] if boundary_positions else 0
+        for ax in ax_param + axs:
+            cursor_lines.append(
+                ax.axvline(
+                    cursor_pos,
+                    color="C2",
+                    linewidth=1.2,
+                    alpha=0.8,
+                    zorder=6,
+                )
+            )
+
+        def _set_cursor(sample_idx: int) -> None:
+            nonlocal cursor_pos
+            sample_idx = int(sample_idx)
+            sample_idx = max(0, min(sample_idx, total - 1))
+            if sample_idx == cursor_pos:
+                return
+            cursor_pos = sample_idx
+            for ln in cursor_lines:
+                ln.set_xdata([sample_idx, sample_idx])
+            _render_spot_grid(sample_idx)
+            fig.canvas.draw_idle()
+
+        time_axes = list(ax_param + axs)
+
+        def _toolbar_mode_active() -> bool:
+            tb = getattr(fig.canvas, "toolbar", None)
+            mode = getattr(tb, "mode", "") if tb is not None else ""
+            return bool(mode)
+
+        dragging = False
+
+        def _on_press(event) -> None:  # pragma: no cover
+            nonlocal dragging
+            if _toolbar_mode_active():
+                return
+            if event.button != 1:
+                return
+            if event.inaxes is None or event.xdata is None:
+                return
+            if event.inaxes not in time_axes:
+                return
+            dragging = True
+            _set_cursor(int(round(float(event.xdata))))
+
+        def _on_release(_event) -> None:  # pragma: no cover
+            nonlocal dragging
+            dragging = False
+
+        def _on_motion(event) -> None:  # pragma: no cover
+            if not dragging:
+                return
+            if event.inaxes is None or event.xdata is None:
+                return
+            if event.inaxes not in time_axes:
+                return
+            _set_cursor(int(round(float(event.xdata))))
+
+        fig.canvas.mpl_connect("button_press_event", _on_press)
+        fig.canvas.mpl_connect("button_release_event", _on_release)
+        fig.canvas.mpl_connect("motion_notify_event", _on_motion)
+        _render_spot_grid(cursor_pos)
+
+        # Simple play/pause animation control (advances the cursor).
+        play_state = {"playing": False}
+        play_fps = 30.0
+        play_duration_s = 6.0
+        n_frames = max(1, int(round(play_duration_s * play_fps)))
+        play_step = max(1, int(np.ceil(total / n_frames)))
+
+        ax_btn = fig.add_axes((0.88, 0.945, 0.10, 0.04))
+        btn = Button(ax_btn, "Play")
+
+        timer = fig.canvas.new_timer(interval=max(1, int(round(1000.0 / play_fps))))
+
+        def _tick() -> None:  # pragma: no cover
+            if not play_state["playing"]:
+                return
+            nxt = cursor_pos + play_step
+            if nxt >= total:
+                nxt = 0
+            _set_cursor(nxt)
+
+        timer.add_callback(_tick)
+
+        def _toggle_play(_event) -> None:  # pragma: no cover
+            play_state["playing"] = not play_state["playing"]
+            btn.label.set_text("Pause" if play_state["playing"] else "Play")
+            if play_state["playing"]:
+                timer.start()
+            else:
+                timer.stop()
+
+        btn.on_clicked(_toggle_play)
+
+        fig._awgsegmentfactory_widgets = getattr(  # type: ignore[attr-defined]
+            fig, "_awgsegmentfactory_widgets", []
+        ) + [btn, timer]
+
     def _set_view(i: int) -> None:
         """Set x-limits and selection markers to the boundary at index `i` (slider mode)."""
         i = int(i)
@@ -559,7 +803,8 @@ def sequence_samples_debug(
         for sel in selected_lines:
             sel.set_xdata([pos, pos])
 
-        fig.suptitle(_boundary_label(i))
+        if spot_grid_enabled:
+            _set_cursor(pos)
         fig.canvas.draw_idle()
 
     updating = False
@@ -635,16 +880,15 @@ def sequence_samples_debug(
             updating = False
 
     if full_view:
-        fig.suptitle(title)
         for ax in ax_param + axs:
             ax.set_xlim(0, total - 1 if total > 0 else 0)
         for ax in ax_param + axs:
             ax.callbacks.connect("xlim_changed", _update_from_xlim)
         _update_from_xlim()
-        fig.subplots_adjust(bottom=0.06, top=0.93, hspace=0.35, wspace=0.25)
+        top = 0.93 if show_spot_grid else 0.97
+        fig.subplots_adjust(bottom=0.06, top=top, hspace=0.35, wspace=0.25)
         return fig, axs, None
 
-    fig.suptitle(_boundary_label(0))
     for ax in ax_param + axs:
         ax.callbacks.connect("xlim_changed", _update_from_xlim)
     _set_view(0)
@@ -661,5 +905,6 @@ def sequence_samples_debug(
             fig, "_awgsegmentfactory_widgets", []
         ) + [slider]  # type: ignore[attr-defined]
 
-    fig.subplots_adjust(bottom=0.08, top=0.93, hspace=0.35, wspace=0.25)
+    top = 0.93 if show_spot_grid else 0.97
+    fig.subplots_adjust(bottom=0.08, top=top, hspace=0.35, wspace=0.25)
     return fig, axs, slider

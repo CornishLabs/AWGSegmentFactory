@@ -109,7 +109,7 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 (matplotlib / ipywidgets).
 
 - Grid/timeline debug (Jupyter): see `examples/debugging.py`
-- Sample-level debug with segment boundaries: see `examples/sequence_samples_debug.py`
+- Sample-level debug with segment boundaries (and optional 2D spot grid): see `examples/sequence_samples_debug.py`
 
 ## Compilation stages (mental model)
 

@@ -8,7 +8,7 @@ In Jupyter, you may want:
 from __future__ import annotations
 
 from awgsegmentfactory import AWGProgramBuilder, ResolvedIR
-from awgsegmentfactory.debug import sequence_samples_debug
+from awgsegmentfactory.debug import LinearFreqToPos, sequence_samples_debug
 
 
 from sequence_repo import recreate_mol_exp
@@ -37,35 +37,10 @@ def main() -> None:
     fs = 625e6
 
     ir = _build_demo_program(sample_rate_hz=fs)
-    """
-    (
-        AWGProgramBuilder()
-        .logical_channel("H")
-        .logical_channel("V")
-        .define("H0", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
-        .define("V0", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
-        .segment("wait", mode="wait_trig")
-        .tones("H")
-        .use_def("H0")
-        .tones("V")
-        .use_def("V0")
-        .hold(time=200e-6)
-        .segment("chirp", mode="once")
-        .tones("H")
-        .move(df=+2e6, time=50e-6, idxs=[0], kind="linear")
-        .segment("amp_ramp_up", mode="once")
-        .tones("H")
-        .ramp_amp_to(amps=0.8, time=80e-6, kind="exp", tau=20e-6)
-        .segment("amp_ramp_down", mode="once")
-        .tones("H")
-        .ramp_amp_to(amps=0.3, time=80e-6, kind="exp", tau=20e-6)
-        .segment("looped_hold", mode="loop_n", loop=5)
-        .hold(time=40e-6)
-        .segment("wait2", mode="wait_trig")
-        .hold(time=200e-6)
-        .build_resolved_ir(sample_rate_hz=fs)
-    )
-    """
+
+    # Optional: map frequency to "position units" for a 2D spot-grid view.
+    fx = LinearFreqToPos(f0_hz=100e6, slope_hz_per_unit=250e3)  # e.g. µm if 250 kHz/µm
+    fy = LinearFreqToPos(f0_hz=100e6, slope_hz_per_unit=-250e3)
 
     fig, axs, slider = sequence_samples_debug(
         ir,
@@ -75,6 +50,10 @@ def main() -> None:
         window_samples=None,  # show the whole unrolled sequence; zoom in with the GUI
         show_slider=False,
         show_markers=False,
+        show_spot_grid=True,
+        spot_grid_fx=fx,
+        spot_grid_fy=fy,
+        spot_grid_annotate=False,
         title="AWG samples",
     )
 

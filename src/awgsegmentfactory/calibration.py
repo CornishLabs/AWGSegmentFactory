@@ -23,3 +23,11 @@ class LinearPositionToFreqCalib(PositionToFreqCalib):
     def df_hz(self, tone_id: ToneId, dx_um: float, logical_channel: str) -> float:
         """Return `slope_hz_per_um * dx_um` (ignores tone/channel)."""
         return self.slope_hz_per_um * float(dx_um)
+
+
+### Designing calibrations
+
+class AODCalib():
+    """Placeholder for future AOD calibration models."""
+
+    pass
