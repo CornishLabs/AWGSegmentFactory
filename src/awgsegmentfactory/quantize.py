@@ -461,6 +461,7 @@ def quantize_resolved_ir(
         sample_rate_hz=fs,
         logical_channels=ir.logical_channels,
         segments=tuple(reconciled),
+        calibrations=dict(getattr(ir, "calibrations", {})),
     )
     return QuantizedIR(
         resolved_ir=q_ir,

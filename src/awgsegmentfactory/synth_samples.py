@@ -11,6 +11,7 @@ from typing import Any, Literal, Optional, Tuple
 
 import numpy as np
 
+from .calibration import OpticalPowerToRFAmpCalib
 from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 from .interpolation import interp_param
 from .phase_minimiser import minimise_crest_factor_phases
@@ -60,6 +61,25 @@ class _PhaseContinueState:
 
     freqs_hz: np.ndarray  # (n_tones,) end-of-segment freqs
     phases_rad: np.ndarray  # (n_tones,) end-of-segment phases
+
+
+def _select_optical_power_calib(
+    calibrations: dict[str, object],
+) -> Optional[OpticalPowerToRFAmpCalib]:
+    """Pick the unique `OpticalPowerToRFAmpCalib` from `calibrations` (or None)."""
+    matches: list[tuple[str, OpticalPowerToRFAmpCalib]] = []
+    for k, v in dict(calibrations).items():
+        if isinstance(v, OpticalPowerToRFAmpCalib):
+            matches.append((str(k), v))
+    if not matches:
+        return None
+    if len(matches) > 1:
+        keys = ", ".join(repr(k) for k, _ in matches)
+        raise ValueError(
+            f"Multiple OpticalPowerToRFAmpCalib calibrations attached ({keys}); "
+            "expected at most one."
+        )
+    return matches[0][1]
 
 
 def _match_tones_by_frequency(
@@ -159,6 +179,7 @@ def _plan_segment_start_phases(
     *,
     logical_channel: str,
     phase_in: Optional[_PhaseContinueState],
+    amp_calib: Optional[OpticalPowerToRFAmpCalib],
 ) -> np.ndarray:
     """Return start phases (CPU/NumPy array) for one segment/logical channel according to `seg.phase_mode`."""
     if not seg.parts:
@@ -178,9 +199,25 @@ def _plan_segment_start_phases(
     if phase_mode == "manual":
         return start_phases
     if phase_mode == "optimise":
+        amps = np.asarray(first.start.amps, dtype=float)
+        if amp_calib is not None:
+            try:
+                amps = np.asarray(
+                    amp_calib.rf_amps(
+                        np.asarray(first.start.freqs_hz, dtype=float),
+                        amps,
+                        logical_channel=logical_channel,
+                        xp=np,
+                    ),
+                    dtype=float,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Optical-power calibration failed while planning segment start phases."
+                ) from exc
         return _optimise_phases_for_crest(
             freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
-            amps=np.asarray(first.start.amps, dtype=float),
+            amps=amps,
         )
 
     # phase_mode == "continue"
@@ -196,9 +233,25 @@ def _plan_segment_start_phases(
         start_phases[cur_i] = float(phase_in.phases_rad[prev_i])
         fixed[cur_i] = True
     if np.any(~fixed):
+        amps = np.asarray(first.start.amps, dtype=float)
+        if amp_calib is not None:
+            try:
+                amps = np.asarray(
+                    amp_calib.rf_amps(
+                        np.asarray(first.start.freqs_hz, dtype=float),
+                        amps,
+                        logical_channel=logical_channel,
+                        xp=np,
+                    ),
+                    dtype=float,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Optical-power calibration failed while planning continued segment phases."
+                ) from exc
         return _optimise_phases_for_crest(
             freqs_hz=np.asarray(first.start.freqs_hz, dtype=float),
-            amps=np.asarray(first.start.amps, dtype=float),
+            amps=amps,
             phases_init_rad=start_phases,
             fixed_mask=fixed,
         )
@@ -265,6 +318,8 @@ def _synth_part(
     n_samples: int,
     sample_rate_hz: float,
     phase0_rad: Any,
+    logical_channel: str,
+    amp_calib: Optional[OpticalPowerToRFAmpCalib],
     xp: Any = np,
 ) -> tuple[Any, Any]:
     """
@@ -282,6 +337,20 @@ def _synth_part(
 
     if freqs.shape[1] == 0:
         return xp.zeros((n_samples,), dtype=float), phase0_rad.copy()
+
+    if amp_calib is not None:
+        try:
+            amps = amp_calib.rf_amps(
+                freqs,
+                amps,
+                logical_channel=logical_channel,
+                xp=xp,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Optical-power calibration failed during sample synthesis. "
+                "If using gpu=True, ensure the calibration supports xp=cupy or compile with gpu=False."
+            ) from exc
 
     dt = 1.0 / float(sample_rate_hz)
     dphi = freqs
@@ -302,6 +371,7 @@ def _synth_logical_channel_segment(
     logical_channel: str,
     sample_rate_hz: float,
     phase_in: Optional[_PhaseContinueState],
+    amp_calib: Optional[OpticalPowerToRFAmpCalib],
     xp: Any = np,
 ) -> tuple[Any, Any]:
     """Synthesize one logical channel's waveform for a full segment."""
@@ -312,6 +382,7 @@ def _synth_logical_channel_segment(
         seg,
         logical_channel=logical_channel,
         phase_in=phase_in,
+        amp_calib=amp_calib,
     )
     phase_dtype = xp.float32 if xp is not np else float
     phase = xp.asarray(phase0_np, dtype=phase_dtype).copy()
@@ -324,6 +395,8 @@ def _synth_logical_channel_segment(
             n_samples=part.n_samples,
             sample_rate_hz=sample_rate_hz,
             phase0_rad=phase,
+            logical_channel=logical_channel,
+            amp_calib=amp_calib,
             xp=xp,
         )
         ys.append(y)
@@ -433,6 +506,7 @@ def compile_sequence_program(
     q_ir = quantized.resolved_ir
     logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
     q_info = quantized.quantization
+    amp_calib = _select_optical_power_calib(getattr(q_ir, "calibrations", {}))
 
     missing = [lc for lc in q_ir.logical_channels if lc not in logical_channel_to_hardware_channel]
     if missing:
@@ -490,6 +564,7 @@ def compile_sequence_program(
                 logical_channel=logical_channel,
                 sample_rate_hz=q_ir.sample_rate_hz,
                 phase_in=phase_state.get(logical_channel),
+                amp_calib=amp_calib,
                 xp=xp,
             )
             # Keep continue state on CPU; it is tiny compared to the waveform buffers.

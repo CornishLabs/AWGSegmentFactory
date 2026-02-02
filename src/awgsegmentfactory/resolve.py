@@ -486,4 +486,5 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
         sample_rate_hz=fs,
         logical_channels=intent.logical_channels,
         segments=tuple(segments),
+        calibrations=dict(intent.calibrations),
     )
