@@ -59,6 +59,13 @@ Figure 3:
       DE(freq, amp) ≈ g(freq) * (amp^2 / (amp^2 + u0(freq)))
     where `g(freq)` is a 6th-order polynomial (in normalized frequency) and `u0(freq)` is a
     frequency-dependent saturation parameter (also a 6th-order polynomial, enforced positive).
+    Optionally, you can add a small "quartic" correction while preserving normalization:
+      DE(freq, amp) ≈ g(freq) * sat_mix(amp; u0(freq), w, b)
+      sat_mix = (1-w) * (a^2 / (a^2 + u0)) + w * (a^4 / (a^4 + b))
+    with `0 <= w <= 1` and `b > 0`. This remains monotonic in `a >= 0` and is invertible
+    (in `u=a^2`, the inverse reduces to a cubic equation).
+    Alternatively, you can use a smooth "monotone Bragg-like" saturation:
+      DE(freq, amp) ≈ g(freq) * tanh^2(a / v0(freq))
 
 Figure 4:
   - Residual slices (data - fit) at the same centre (freq, amp) points as Figure 2.
@@ -66,6 +73,8 @@ Figure 4:
 Usage:
   python examples/plot_de_compensation_file.py
   python examples/plot_de_compensation_file.py path/to/calFile.txt
+  python examples/plot_de_compensation_file.py --sat-model tanh2
+  python examples/plot_de_compensation_file.py --sat-model mix_quartic
 """
 
 from __future__ import annotations
@@ -266,6 +275,79 @@ def _polyval_horner(coeffs_high_to_low: np.ndarray, x: np.ndarray) -> np.ndarray
     return y
 
 
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    # Clip to keep exp() finite in extreme optimizer steps.
+    x = np.clip(x, -60.0, 60.0)
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _logit(p: float) -> float:
+    p = float(p)
+    if not np.isfinite(p) or p <= 0.0 or p >= 1.0:
+        raise ValueError("logit() expects p in (0, 1)")
+    return float(np.log(p / (1.0 - p)))
+
+
+def _sat_u_over_u_plus_u0(u: np.ndarray, u0_by_freq: np.ndarray) -> np.ndarray:
+    u = np.asarray(u, dtype=float).reshape(-1)
+    u0_by_freq = np.asarray(u0_by_freq, dtype=float).reshape(-1)
+    return u[None, :] / (u[None, :] + u0_by_freq[:, None])
+
+
+def _sat_tanh2(a_mV: np.ndarray, v0_mV_by_freq: np.ndarray) -> np.ndarray:
+    """
+    Smooth, monotone saturation curve:
+      sat(a) = tanh^2(a / v0)
+
+    This has small-signal behavior sat ~ (a/v0)^2 and saturates to 1 at large a.
+    """
+    a = np.asarray(a_mV, dtype=float).reshape(-1)
+    v0 = np.asarray(v0_mV_by_freq, dtype=float).reshape(-1)
+    if not np.all(np.isfinite(v0)):
+        raise ValueError("v0_mV_by_freq must be finite")
+    if np.any(v0 <= 0):
+        raise ValueError("v0_mV_by_freq must be > 0")
+    t = a[None, :] / v0[:, None]
+    return np.tanh(t) ** 2
+
+
+def _sat_mix_quartic(
+    u: np.ndarray,
+    u0_by_freq: np.ndarray,
+    *,
+    w: float,
+    b_mV4: float,
+) -> np.ndarray:
+    """
+    Normalized mixture of a quadratic and quartic saturation curve.
+
+    In RF amplitude `a` (mV), we use u=a^2 and:
+      sat_mix = (1-w) * u/(u+u0) + w * u^2/(u^2 + b)
+    where `b` has units of mV^4 (since u^2 = a^4).
+    """
+    w = float(w)
+    if not np.isfinite(w) or w < 0.0 or w > 1.0:
+        raise ValueError("w must be finite and in [0, 1]")
+    b = float(b_mV4)
+    if not np.isfinite(b) or b <= 0.0:
+        raise ValueError("b_mV4 must be finite and > 0")
+
+    u = np.asarray(u, dtype=float).reshape(-1)
+    u2 = u * u
+    u0_by_freq = np.asarray(u0_by_freq, dtype=float).reshape(-1)
+
+    # sat2 is frequency-independent, but return it with the same (n_freq, n_amp) shape.
+    sat2_1 = u2[None, :] / (u2[None, :] + b)  # (1, n_amp)
+    sat2 = np.broadcast_to(sat2_1, (u0_by_freq.size, u.size))
+    if w == 1.0:
+        return sat2
+    sat1 = _sat_u_over_u_plus_u0(u, u0_by_freq)
+    if w == 0.0:
+        return sat1
+    return (1.0 - w) * sat1 + w * sat2
+
+
 def _fit_sat_poly_model(
     *,
     freqs_mhz: np.ndarray,
@@ -273,13 +355,27 @@ def _fit_sat_poly_model(
     de: np.ndarray,
     degree_g: int = 6,
     degree_knee: int = 6,
+    sat_model: str = "u_over_u_plus_u0",
+    # Only used for sat_model == "mix_quartic".
+    quartic_w_init: float = 0.02,
+    quartic_b_init_mV4: float | None = None,
     clamp_de_nonnegative: bool = True,
     min_u0_mV2: float = 1e-9,
 ) -> dict[str, object]:
     """
     Fit:
-        DE(freq, amp) ≈ g(freq) * sat(amp^2; u0(freq))
-        sat(u; u0) = u / (u + u0)
+        DE(freq, amp) ≈ g(freq) * sat(amp^2; ...)
+
+        sat_model="u_over_u_plus_u0":
+            sat(u; u0) = u / (u + u0)
+
+        sat_model="tanh2":
+            sat(a; v0) = tanh^2(a / v0)
+            where `v0>0` has units of mV.
+
+        sat_model="mix_quartic":
+            sat_mix(u; u0, w, b) = (1-w) * u/(u+u0) + w * u^2/(u^2 + b)
+            where `0<=w<=1` and `b>0` (units: mV^4).
         g(freq) is a degree-`degree_g` polynomial in normalized frequency x ∈ [-1, 1].
         u0(freq) is a degree-`degree_knee` polynomial in normalized frequency, squared to enforce u0>0.
 
@@ -291,6 +387,10 @@ def _fit_sat_poly_model(
         raise ValueError("degree_knee must be >= 0")
     if de.shape != (freqs_mhz.size, amps_mV.size):
         raise ValueError("shape mismatch for freqs/amps/de")
+
+    sat_model = str(sat_model).strip()
+    if sat_model not in {"u_over_u_plus_u0", "tanh2", "mix_quartic"}:
+        raise ValueError("sat_model must be one of {'u_over_u_plus_u0', 'tanh2', 'mix_quartic'}")
 
     min_u0 = float(min_u0_mV2)
     if not np.isfinite(min_u0) or min_u0 <= 0:
@@ -320,6 +420,8 @@ def _fit_sat_poly_model(
     # A useful scale for initializing the knee.
     u_pos_min = float(np.min(u_pos))
     u_pos_max = float(np.max(u_pos))
+    a_pos_min = float(np.min(a[a > 0]))
+    a_pos_max = float(np.max(a))
 
     de_sq_sum = float(np.sum(de_used * de_used))
 
@@ -327,6 +429,11 @@ def _fit_sat_poly_model(
         a0 = _polyval_horner(np.asarray(coeffs_a0, dtype=float), x)
         u0 = (a0 * a0) + min_u0
         return a0, u0
+
+    def _a0_and_v0_for_coeffs(coeffs_a0: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        a0 = _polyval_horner(np.asarray(coeffs_a0, dtype=float), x)
+        v0 = np.sqrt((a0 * a0) + min_u0)
+        return a0, v0
 
     def eval_for_coeffs_a0(
         coeffs_a0: np.ndarray,
@@ -343,7 +450,7 @@ def _fit_sat_poly_model(
             )
 
         # sat is per-frequency because u0 varies with freq.
-        sat = u[None, :] / (u[None, :] + u0[:, None])  # (n_freq, n_amp)
+        sat = _sat_u_over_u_plus_u0(u, u0)  # (n_freq, n_amp)
         denom = np.sum(sat * sat, axis=1)  # (n_freq,)
         # Avoid divide-by-zero: if denom is zero, sat is all-zero -> data must also be all-zero.
         denom = np.maximum(denom, 1e-30)
@@ -366,6 +473,68 @@ def _fit_sat_poly_model(
             float(sse),
         )
 
+    def eval_for_coeffs_a0_tanh2(
+        coeffs_a0: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+        a0, v0 = _a0_and_v0_for_coeffs(coeffs_a0)
+        if not np.all(np.isfinite(v0)):
+            return (
+                np.full((degree_g + 1,), np.nan),
+                np.full((degree_knee + 1,), np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                float("inf"),
+            )
+
+        sat = _sat_tanh2(a, v0)  # (n_freq, n_amp)
+        denom = np.sum(sat * sat, axis=1)  # (n_freq,)
+        denom = np.maximum(denom, 1e-30)
+        dots = np.sum(de_used * sat, axis=1)  # (n_freq,)
+        g = dots / denom
+        coeffs_g = np.polyfit(x, g, deg=degree_g)
+        g_fit = _polyval_horner(coeffs_g, x)
+        sse = de_sq_sum - (2.0 * float(np.dot(g_fit, dots))) + float(np.dot((g_fit * g_fit), denom))
+        return (
+            np.asarray(coeffs_g, dtype=float),
+            np.asarray(coeffs_a0, dtype=float),
+            np.asarray(a0, dtype=float),
+            np.asarray(v0, dtype=float),
+            np.asarray(g_fit, dtype=float),
+            float(sse),
+        )
+
+    def eval_for_coeffs_a0_and_quartic(
+        coeffs_a0: np.ndarray, *, w: float, b_mV4: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+        a0, u0 = _a0_and_u0_for_coeffs(coeffs_a0)
+        if not np.all(np.isfinite(u0)):
+            return (
+                np.full((degree_g + 1,), np.nan),
+                np.full((degree_knee + 1,), np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                np.full_like(x, np.nan),
+                float("inf"),
+            )
+
+        sat = _sat_mix_quartic(u, u0, w=float(w), b_mV4=float(b_mV4))
+        denom = np.sum(sat * sat, axis=1)  # (n_freq,)
+        denom = np.maximum(denom, 1e-30)
+        dots = np.sum(de_used * sat, axis=1)  # (n_freq,)
+        g = dots / denom
+        coeffs_g = np.polyfit(x, g, deg=degree_g)
+        g_fit = _polyval_horner(coeffs_g, x)
+        sse = de_sq_sum - (2.0 * float(np.dot(g_fit, dots))) + float(np.dot((g_fit * g_fit), denom))
+        return (
+            np.asarray(coeffs_g, dtype=float),
+            np.asarray(coeffs_a0, dtype=float),
+            np.asarray(a0, dtype=float),
+            np.asarray(u0, dtype=float),
+            np.asarray(g_fit, dtype=float),
+            float(sse),
+        )
+
     try:
         from scipy.optimize import minimize, minimize_scalar  # type: ignore
     except Exception as exc:  # pragma: no cover
@@ -374,7 +543,21 @@ def _fit_sat_poly_model(
     # Initialize:
     # - If u0 is constant, solve the 1D problem for a strong initial guess.
     # - Then use a frequency-dependent knee polynomial initialized to the same constant.
-    def _initial_u0_const() -> float:
+    def _initial_knee_const() -> float:
+        if sat_model == "tanh2":
+            lo = float(np.log10(a_pos_min * 1e-3))
+            hi = float(np.log10(a_pos_max * 1e3))
+
+            def objective(log_v0: float) -> float:
+                v0 = 10.0 ** float(log_v0)
+                coeffs_a0 = np.zeros((degree_knee + 1,), dtype=float)
+                coeffs_a0[-1] = float(v0)
+                _coeffs_g, _coeffs_a0, _a0, _v0, _g_fit, sse = eval_for_coeffs_a0_tanh2(coeffs_a0)
+                return sse
+
+            opt = minimize_scalar(objective, bounds=(lo, hi), method="bounded")
+            return 10.0 ** float(opt.x)
+
         lo = float(np.log10(u_pos_min * 1e-3))
         hi = float(np.log10(u_pos_max * 1e3))
 
@@ -388,33 +571,93 @@ def _fit_sat_poly_model(
             return sse
 
         opt = minimize_scalar(objective, bounds=(lo, hi), method="bounded")
-        return 10.0 ** float(opt.x)
+        return float(np.sqrt(max(10.0 ** float(opt.x), min_u0)))
 
-    u0_init = _initial_u0_const()
-    a0_init = float(np.sqrt(max(u0_init, min_u0)))
+    knee_init_mV = _initial_knee_const()
+    u0_init_mV2 = float(max(knee_init_mV * knee_init_mV, min_u0))
+    a0_init = float(knee_init_mV)
     coeffs_a0_init = np.zeros((degree_knee + 1,), dtype=float)
     coeffs_a0_init[-1] = a0_init
 
-    def objective_vec(coeffs_a0_flat: np.ndarray) -> float:
-        coeffs_a0 = np.asarray(coeffs_a0_flat, dtype=float).reshape(-1)
-        if coeffs_a0.shape != (degree_knee + 1,):
-            raise ValueError("internal shape mismatch for knee coefficients")
-        _coeffs_g, _coeffs_a0, _a0, _u0, _g_fit, sse = eval_for_coeffs_a0(coeffs_a0)
+    def objective_vec(p_flat: np.ndarray) -> float:
+        p = np.asarray(p_flat, dtype=float).reshape(-1)
+        if sat_model == "u_over_u_plus_u0":
+            coeffs_a0 = p
+            if coeffs_a0.shape != (degree_knee + 1,):
+                raise ValueError("internal shape mismatch for knee coefficients")
+            _coeffs_g, _coeffs_a0, _a0, _u0, _g_fit, sse = eval_for_coeffs_a0(coeffs_a0)
+            return float(sse)
+
+        if sat_model == "tanh2":
+            coeffs_a0 = p
+            if coeffs_a0.shape != (degree_knee + 1,):
+                raise ValueError("internal shape mismatch for knee coefficients")
+            _coeffs_g, _coeffs_a0, _a0, _v0, _g_fit, sse = eval_for_coeffs_a0_tanh2(coeffs_a0)
+            return float(sse)
+
+        if p.size != (degree_knee + 1) + 2:
+            raise ValueError("internal shape mismatch for quartic parameter vector")
+        coeffs_a0 = p[: degree_knee + 1]
+        w = float(_sigmoid(p[degree_knee + 1]))
+        log_b = float(p[degree_knee + 2])
+        b_mV4 = float(np.exp(log_b))
+        try:
+            _coeffs_g, _coeffs_a0, _a0, _u0, _g_fit, sse = eval_for_coeffs_a0_and_quartic(
+                coeffs_a0, w=w, b_mV4=b_mV4
+            )
+        except Exception:
+            return float("inf")
         return float(sse)
+
+    if sat_model in {"u_over_u_plus_u0", "tanh2"}:
+        p0 = coeffs_a0_init
+    else:  # mix_quartic
+        w0 = float(quartic_w_init)
+        w0 = float(np.clip(w0, 1e-6, 1.0 - 1e-6))
+        b0 = (
+            float(quartic_b_init_mV4)
+            if quartic_b_init_mV4 is not None
+            else float(u0_init_mV2 * u0_init_mV2)
+        )
+        b0 = float(max(b0, min_u0 * min_u0))
+        p0 = np.concatenate(
+            [
+                coeffs_a0_init,
+                np.array([_logit(w0), float(np.log(b0))], dtype=float),
+            ],
+            axis=0,
+        )
 
     opt = minimize(
         objective_vec,
-        x0=coeffs_a0_init,
+        x0=p0,
         method="Powell",
-        options={"maxiter": 200, "xtol": 1e-4, "ftol": 1e-6},
+        options={"maxiter": 250, "xtol": 1e-4, "ftol": 1e-6},
     )
-    coeffs_a0_best = np.asarray(opt.x, dtype=float)
-    coeffs_g, _coeffs_a0, a0_by_freq, u0_by_freq, g_fit, sse = eval_for_coeffs_a0(
-        coeffs_a0_best
-    )
+    p_best = np.asarray(opt.x, dtype=float)
+
+    quartic_w: float | None = None
+    quartic_b_mV4: float | None = None
+    v0_by_freq: np.ndarray | None = None
+    if sat_model == "u_over_u_plus_u0":
+        coeffs_a0_best = p_best
+        coeffs_g, _coeffs_a0, a0_by_freq, u0_by_freq, g_fit, sse = eval_for_coeffs_a0(coeffs_a0_best)
+        sat = _sat_u_over_u_plus_u0(u, u0_by_freq)
+    elif sat_model == "tanh2":
+        coeffs_a0_best = p_best
+        coeffs_g, _coeffs_a0, a0_by_freq, v0_by_freq, g_fit, sse = eval_for_coeffs_a0_tanh2(coeffs_a0_best)
+        sat = _sat_tanh2(a, v0_by_freq)
+        u0_by_freq = (v0_by_freq * v0_by_freq)  # for consistent downstream reporting
+    else:
+        coeffs_a0_best = p_best[: degree_knee + 1]
+        quartic_w = float(_sigmoid(p_best[degree_knee + 1]))
+        quartic_b_mV4 = float(np.exp(p_best[degree_knee + 2]))
+        coeffs_g, _coeffs_a0, a0_by_freq, u0_by_freq, g_fit, sse = eval_for_coeffs_a0_and_quartic(
+            coeffs_a0_best, w=quartic_w, b_mV4=quartic_b_mV4
+        )
+        sat = _sat_mix_quartic(u, u0_by_freq, w=quartic_w, b_mV4=quartic_b_mV4)
 
     # Build the fitted surface for residual plots.
-    sat = u[None, :] / (u[None, :] + u0_by_freq[:, None])
     de_fit = g_fit[:, None] * sat
 
     rmse = float(np.sqrt(np.mean((de_used - de_fit) ** 2)))
@@ -423,6 +666,10 @@ def _fit_sat_poly_model(
     return {
         "degree_g": int(degree_g),
         "degree_knee": int(degree_knee),
+        "sat_model": sat_model,
+        "quartic_w": quartic_w,
+        "quartic_b_mV4": quartic_b_mV4,
+        "v0_mV_by_freq": v0_by_freq,
         "min_u0_mV2": float(min_u0),
         "u0_mV2_by_freq": u0_by_freq,
         "a0_mV_by_freq": a0_by_freq,
@@ -496,26 +743,49 @@ def _plot_fit_and_residuals(
     u0_by_f = np.asarray(fit["u0_mV2_by_freq"], dtype=float).reshape(-1)
     rmse = float(fit["rmse"])
     max_abs = float(fit["max_abs_resid"])
+    sat_model = str(fit.get("sat_model", "u_over_u_plus_u0"))
+    quartic_w = fit.get("quartic_w")
+    quartic_b = fit.get("quartic_b_mV4")
+
+    if sat_model == "mix_quartic":
+        model_str = "DE ≈ g(x) * [(1-w)*a²/(a²+u0(x)) + w*a⁴/(a⁴+b)]"
+        extra = f"   w={float(quartic_w):.4g}, b={float(quartic_b):.4g} mV⁴"
+    elif sat_model == "tanh2":
+        model_str = "DE ≈ g(x) * tanh²(a/v0(x))"
+        extra = ""
+    else:
+        model_str = "DE ≈ g(x) * (a²/(a²+u0(x)))"
+        extra = ""
     fig.suptitle(
-        f"Fit: DE ≈ g(x) * (a²/(a²+u0(x)))   "
-        f"RMSE={rmse:.4g}, max|res|={max_abs:.4g}"
+        f"Fit: {model_str}   RMSE={rmse:.4g}, max|res|={max_abs:.4g}{extra}"
     )
     fig.tight_layout()
 
     print("\n--- analytic fit (DE_RF_calibration) ---")
-    print("Model: DE(freq, a) = g(freq) * (a^2 / (a^2 + u0(freq)))")
+    if sat_model == "mix_quartic":
+        print("Model: DE(freq, a) = g(freq) * [(1-w)*a^2/(a^2+u0(freq)) + w*a^4/(a^4+b)]")
+        print("  w =", float(quartic_w))
+        print("  b_mV^4 =", float(quartic_b))
+    elif sat_model == "tanh2":
+        print("Model: DE(freq, a) = g(freq) * tanh^2(a / v0(freq))")
+    else:
+        print("Model: DE(freq, a) = g(freq) * (a^2 / (a^2 + u0(freq)))")
     print("  freq normalization: x = (f_MHz - mid)/halfspan")
     print("  mid_MHz =", float(fit["freq_mid_mhz"]))
     print("  halfspan_MHz =", float(fit["freq_halfspan_mhz"]))
     print("  g(x) poly coeffs (high->low) =", coeffs_g.tolist())
     print("  a0(x) poly coeffs (high->low) =", coeffs_a0.tolist())
-    print(
-        "  a0_mV range =",
-        (float(np.min(a0_by_f)), float(np.max(a0_by_f))),
-        " (u0_mV^2 range =",
-        (float(np.min(u0_by_f)), float(np.max(u0_by_f))),
-        ")",
-    )
+    if sat_model == "tanh2":
+        v0_by_f = np.asarray(fit["v0_mV_by_freq"], dtype=float).reshape(-1)
+        print("  v0_mV range =", (float(np.min(v0_by_f)), float(np.max(v0_by_f))))
+    else:
+        print(
+            "  a0_mV range =",
+            (float(np.min(a0_by_f)), float(np.max(a0_by_f))),
+            " (u0_mV^2 range =",
+            (float(np.min(u0_by_f)), float(np.max(u0_by_f))),
+            ")",
+        )
     print("  RMSE =", rmse)
     print("  max|residual| =", max_abs)
 
@@ -563,6 +833,12 @@ def main() -> None:
         default="examples/814_H_calFile_17.02.2022_0=0.txt",
         help="Path to a DE compensation calibration JSON file.",
     )
+    parser.add_argument(
+        "--sat-model",
+        choices=["u_over_u_plus_u0", "tanh2", "mix_quartic"],
+        default="u_over_u_plus_u0",
+        help="Which saturation curve to fit.",
+    )
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -584,7 +860,14 @@ def main() -> None:
         )
 
     freqs_mhz, amps_mV, de = _de_rf_grid(de_rf)
-    fit = _fit_sat_poly_model(freqs_mhz=freqs_mhz, amps_mV=amps_mV, de=de, degree_g=6, degree_knee=6)
+    fit = _fit_sat_poly_model(
+        freqs_mhz=freqs_mhz,
+        amps_mV=amps_mV,
+        de=de,
+        degree_g=6,
+        degree_knee=6,
+        sat_model=str(args.sat_model),
+    )
     de_fit = np.asarray(fit["de_fit"], dtype=float)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13, 5), sharex=False, sharey=False)

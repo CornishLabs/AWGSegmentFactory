@@ -101,7 +101,7 @@ def interp_param(
     
     if kind == "adiabatic_ramp":
         u = xp.asarray(u, dtype=float)
-        return adiabatic_ramp_awg_amp(start, end, u, smooth=True, eps=0.02, xp=xp)
+        return adiabatic_ramp_awg_amp(start, end, u, smooth=True, eps=0.005, xp=xp)
 
     uu: float | np.ndarray
     if kind == "min_jerk":
