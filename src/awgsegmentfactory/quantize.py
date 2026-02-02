@@ -306,7 +306,7 @@ def quantize_resolved_ir(
         )
 
     for seg in ir.segments:
-        loopable = seg.mode == "wait_trig" or seg.loop > 1
+        loopable = (seg.mode == "wait_trig") or (seg.loop > 1)
         n0 = int(seg.n_samples)
 
         constant = all(_segment_is_constant(seg, lc) for lc in ir.logical_channels)

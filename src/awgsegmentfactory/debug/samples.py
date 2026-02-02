@@ -167,6 +167,8 @@ def sequence_samples_debug(
     - Plots raw int16 samples per enabled channel (with dynamic downsampling for speed).
     - Draws vertical boundary markers at every segment repetition (including loops):
       solid = transition to a different segment, dashed = repeat of the same segment.
+    - Optional per-sample frequency/amplitude traces (if `show_param_traces=True`) are
+      rendered on the same unrolled x-axis (including `wait_trig_loops` repeats).
     - Optional boundary slider (index into the boundary list) that re-centers the view.
     - Set `window_samples=None` to plot the entire unrolled sequence at once (no slider).
 
@@ -251,40 +253,51 @@ def sequence_samples_debug(
         param_channels = param_channels[:2]
 
     n_wave = len(channels)
-    n_param_rows = (
-        2
-        if show_param_traces and len(param_channels) >= 2
-        else (1 if show_param_traces else 0)
-    )
-
-    fig = plt.figure(figsize=(14, 2.4 * max(1, n_param_rows) + 2.6 * n_wave))
-    gs = GridSpec(
-        nrows=n_param_rows + n_wave,
-        ncols=2,
-        figure=fig,
-        height_ratios=[1] * n_param_rows + [2] * n_wave,
-    )
-
-    ax_param: list = []
+    n_param_channels = 0
     if show_param_traces:
-        if n_param_rows == 1:
-            ax0 = fig.add_subplot(gs[0, 0])
-            ax_param = [ax0, fig.add_subplot(gs[0, 1], sharex=ax0)]
-        else:
-            ax0 = fig.add_subplot(gs[0, 0])
-            ax_param = [
-                ax0,
-                fig.add_subplot(gs[0, 1], sharex=ax0),
-                fig.add_subplot(gs[1, 0], sharex=ax0),
-                fig.add_subplot(gs[1, 1], sharex=ax0),
-            ]
+        n_param_channels = min(2, len(param_channels))
+    n_param_axes = 2 * n_param_channels
 
-    axs = [
-        fig.add_subplot(
-            gs[n_param_rows + i, :], sharex=ax_param[0] if ax_param else None
-        )
-        for i in range(n_wave)
-    ]
+    # Vertical stack layout: frequency/amp traces (optional) above waveform channels,
+    # all sharing the same x-axis.
+    fig = plt.figure(figsize=(14, 2.4 * max(1, n_param_channels) + 2.6 * n_wave))
+    gs = GridSpec(
+        nrows=n_param_axes + n_wave,
+        ncols=1,
+        figure=fig,
+        height_ratios=[1] * n_param_axes + [2] * n_wave,
+    )
+
+    ax_master = None
+    ax_param: list = []
+    param_axes: list[tuple[int, object, object]] = []
+    row = 0
+    if show_param_traces and n_param_channels > 0:
+        for ch in param_channels[:n_param_channels]:
+            if ax_master is None:
+                ax_f = fig.add_subplot(gs[row, 0])
+                ax_master = ax_f
+            else:
+                ax_f = fig.add_subplot(gs[row, 0], sharex=ax_master)
+            row += 1
+            ax_a = fig.add_subplot(gs[row, 0], sharex=ax_master)
+            row += 1
+            ax_param.extend([ax_f, ax_a])
+            param_axes.append((int(ch), ax_f, ax_a))
+
+    axs = []
+    for i in range(n_wave):
+        r = row + i
+        if ax_master is None:
+            ax = fig.add_subplot(gs[r, 0])
+            ax_master = ax
+        else:
+            ax = fig.add_subplot(gs[r, 0], sharex=ax_master)
+        axs.append(ax)
+
+    # With shared x-axis, only show x tick labels on the bottom-most axis.
+    for ax in ax_param + axs[:-1]:
+        ax.tick_params(labelbottom=False)
 
     boundary_positions = [inst.start_sample for inst in instances]
     slider = None
@@ -416,15 +429,12 @@ def sequence_samples_debug(
             segment_param_cache[key] = (freqs, amps)
             return freqs, amps
 
-        for row, ch in enumerate(param_channels[:2]):
-            ax_f = ax_param[row * 2 + 0] if n_param_rows == 2 else ax_param[0]
-            ax_a = ax_param[row * 2 + 1] if n_param_rows == 2 else ax_param[1]
-
+        for idx, (ch, ax_f, ax_a) in enumerate(param_axes):
             ax_f.set_ylabel(f"CH{ch} freq ({freq_unit})")
             ax_a.set_ylabel(f"CH{ch} amp")
             ax_f.grid(True, alpha=0.25)
             ax_a.grid(True, alpha=0.25)
-            if row == 0:
+            if idx == 0:
                 ax_f.set_title("Frequency vs time")
                 ax_a.set_title("Amplitude vs time")
 
@@ -576,15 +586,12 @@ def sequence_samples_debug(
                 step = _downsample_step(n, max_points=max_points_param)
                 x = np.arange(x0w, x1w, step, dtype=int)
                 x_float = x.astype(float, copy=False)
-                for row, ch in enumerate(param_channels[:2]):
+                for ch, ax_f, ax_a in param_axes:
                     logical_channel = _param_logical_channel_for_hardware_channel(ch)
                     if logical_channel is None:
                         continue
                     freqs_w, amps_w = _params_at(logical_channel, x)
                     freqs_plot = freqs_w * f_scale
-
-                    ax_f = ax_param[row * 2 + 0] if n_param_rows == 2 else ax_param[0]
-                    ax_a = ax_param[row * 2 + 1] if n_param_rows == 2 else ax_param[1]
 
                     lf = param_lines_freq.setdefault(ch, [])
                     la = param_lines_amp.setdefault(ch, [])
@@ -631,13 +638,15 @@ def sequence_samples_debug(
         fig.suptitle(title)
         for ax in ax_param + axs:
             ax.set_xlim(0, total - 1 if total > 0 else 0)
-        axs[-1].callbacks.connect("xlim_changed", _update_from_xlim)
+        for ax in ax_param + axs:
+            ax.callbacks.connect("xlim_changed", _update_from_xlim)
         _update_from_xlim()
         fig.subplots_adjust(bottom=0.06, top=0.93, hspace=0.35, wspace=0.25)
         return fig, axs, None
 
     fig.suptitle(_boundary_label(0))
-    axs[-1].callbacks.connect("xlim_changed", _update_from_xlim)
+    for ax in ax_param + axs:
+        ax.callbacks.connect("xlim_changed", _update_from_xlim)
     _set_view(0)
 
     if slider is not None:

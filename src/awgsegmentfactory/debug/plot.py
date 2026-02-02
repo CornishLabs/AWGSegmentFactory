@@ -24,13 +24,13 @@ class LinearFreqToPos:
 
 
 def norm_total_amp_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
-    A = np.sqrt(np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :])
+    A = ((np.clip(aH, 0, None)[:, None] * np.clip(aV, 0, None)[None, :]))**(1/4)
     return A.reshape(-1)
 
 def default_size_fn(aH: np.ndarray, aV: np.ndarray) -> np.ndarray:
     """Default marker size function for NxM grids (geometric mean of H/V amplitudes)."""
     # outer product -> flattened NxM sizes
-    A = norm_total_amp_fn(aH, aV)
+    A = np.sqrt(norm_total_amp_fn(aH, aV))
     return 60.0 * A
 
 
