@@ -6,7 +6,7 @@ This package implements a small pipeline:
 """
 
 from .builder import AWGProgramBuilder
-from .calibration import LinearPositionToFreqCalib
+from .calibration import AODTanh2Calib, LinearPositionToFreqCalib
 from .intent_ir import IntentIR
 from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
@@ -29,6 +29,7 @@ from .phase_minimiser import minimise_crest_factor_phases, schroeder_phases_rad
 __all__ = [
     "AWGProgramBuilder",
     "LinearPositionToFreqCalib",
+    "AODTanh2Calib",
     "IntentIR",
     "ResolvedIR",
     "resolve_intent_ir",

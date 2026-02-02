@@ -56,16 +56,9 @@ Figure 2:
 
 Figure 3:
   - Data/model/residual heatmaps for a simple analytic fit of `DE_RF_calibration`:
-      DE(freq, amp) ≈ g(freq) * (amp^2 / (amp^2 + u0(freq)))
-    where `g(freq)` is a 6th-order polynomial (in normalized frequency) and `u0(freq)` is a
-    frequency-dependent saturation parameter (also a 6th-order polynomial, enforced positive).
-    Optionally, you can add a small "quartic" correction while preserving normalization:
-      DE(freq, amp) ≈ g(freq) * sat_mix(amp; u0(freq), w, b)
-      sat_mix = (1-w) * (a^2 / (a^2 + u0)) + w * (a^4 / (a^4 + b))
-    with `0 <= w <= 1` and `b > 0`. This remains monotonic in `a >= 0` and is invertible
-    (in `u=a^2`, the inverse reduces to a cubic equation).
-    Alternatively, you can use a smooth "monotone Bragg-like" saturation:
       DE(freq, amp) ≈ g(freq) * tanh^2(a / v0(freq))
+    where `g(freq)` is a 6th-order polynomial (in normalized frequency) and `v0(freq)` is a
+    frequency-dependent knee (also a 6th-order polynomial, enforced positive).
 
 Figure 4:
   - Residual slices (data - fit) at the same centre (freq, amp) points as Figure 2.
@@ -73,8 +66,6 @@ Figure 4:
 Usage:
   python examples/plot_de_compensation_file.py
   python examples/plot_de_compensation_file.py path/to/calFile.txt
-  python examples/plot_de_compensation_file.py --sat-model tanh2
-  python examples/plot_de_compensation_file.py --sat-model mix_quartic
 """
 
 from __future__ import annotations
@@ -355,7 +346,7 @@ def _fit_sat_poly_model(
     de: np.ndarray,
     degree_g: int = 6,
     degree_knee: int = 6,
-    sat_model: str = "u_over_u_plus_u0",
+    sat_model: str = "tanh2",
     # Only used for sat_model == "mix_quartic".
     quartic_w_init: float = 0.02,
     quartic_b_init_mV4: float | None = None,
@@ -833,12 +824,6 @@ def main() -> None:
         default="examples/814_H_calFile_17.02.2022_0=0.txt",
         help="Path to a DE compensation calibration JSON file.",
     )
-    parser.add_argument(
-        "--sat-model",
-        choices=["u_over_u_plus_u0", "tanh2", "mix_quartic"],
-        default="u_over_u_plus_u0",
-        help="Which saturation curve to fit.",
-    )
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -866,7 +851,7 @@ def main() -> None:
         de=de,
         degree_g=6,
         degree_knee=6,
-        sat_model=str(args.sat_model),
+        sat_model="tanh2",
     )
     de_fit = np.asarray(fit["de_fit"], dtype=float)
 
