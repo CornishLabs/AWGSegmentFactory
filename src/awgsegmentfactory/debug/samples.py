@@ -761,7 +761,7 @@ def sequence_samples_debug(
         n_frames = max(1, int(round(play_duration_s * play_fps)))
         play_step = max(1, int(np.ceil(total / n_frames)))
 
-        ax_btn = fig.add_axes((0.88, 0.945, 0.10, 0.04))
+        ax_btn = fig.add_axes((0.8, 0.92, 0.10, 0.04))
         btn = Button(ax_btn, "Play")
 
         timer = fig.canvas.new_timer(interval=max(1, int(round(1000.0 / play_fps))))
