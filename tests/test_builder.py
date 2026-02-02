@@ -114,6 +114,30 @@ class TestBuilder(unittest.TestCase):
         snapped = q_ir.segments[0].parts[0].logical_channels["H"].start.freqs_hz[0]
         self.assertAlmostEqual(float(snapped), expected, places=12)
 
+    def test_wait_trig_can_skip_quantum_snapping_for_min_latency(self) -> None:
+        fs = 10_000_000.0
+        b = (
+            AWGProgramBuilder()
+            .logical_channel("H")
+            .logical_channel("V")
+            .segment("sync", mode="wait_trig", snap_len_to_quantum=False)
+            .hold(time=1.0 / fs)  # exactly 1 sample
+        )
+
+        ir = b.build_resolved_ir(sample_rate_hz=fs)
+        self.assertEqual(ir.segments[0].n_samples, 1)
+
+        quantized = quantize_resolved_ir(
+            ir,
+            logical_channel_to_hardware_channel={"H": 0, "V": 1},
+        )
+        q_ir = quantized.resolved_ir
+        q_info = quantized.quantization
+
+        self.assertFalse(q_info[0].snap_len_to_quantum)
+        self.assertEqual(q_ir.segments[0].n_samples, 192)  # min for 2 channels (step=32)
+        self.assertGreater(q_info[0].quantum_samples, q_ir.segments[0].n_samples)
+
     def test_loop_n_hold_does_not_snap(self) -> None:
         fs = 10.0
         f0 = 7.0

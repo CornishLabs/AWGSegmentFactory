@@ -202,9 +202,18 @@ class LogicalChannelView:
         loop: Optional[int] = None,
         *,
         phase_mode: SegmentPhaseMode = "continue",
+        snap_len_to_quantum: bool = True,
+        snap_freqs_to_wrap: bool = True,
     ) -> "AWGProgramBuilder":
         """Start a new segment and return the builder for further chaining."""
-        return self._b.segment(name, mode=mode, loop=loop, phase_mode=phase_mode)
+        return self._b.segment(
+            name,
+            mode=mode,
+            loop=loop,
+            phase_mode=phase_mode,
+            snap_len_to_quantum=snap_len_to_quantum,
+            snap_freqs_to_wrap=snap_freqs_to_wrap,
+        )
 
     def hold(self, *, time: float) -> "AWGProgramBuilder":
         """Append a `HoldOp` (hold all logical channels for a duration)."""
@@ -332,6 +341,8 @@ class AWGProgramBuilder:
         loop: Optional[int] = None,
         *,
         phase_mode: SegmentPhaseMode = "continue",
+        snap_len_to_quantum: bool = True,
+        snap_freqs_to_wrap: bool = True,
     ) -> "AWGProgramBuilder":
         """
         Start a new segment; subsequent ops are appended to this segment.
@@ -370,6 +381,8 @@ class AWGProgramBuilder:
                 loop=int(loop),
                 ops=tuple(),
                 phase_mode=phase_mode,
+                snap_len_to_quantum=bool(snap_len_to_quantum),
+                snap_freqs_to_wrap=bool(snap_freqs_to_wrap),
             )
         )
         self._current_seg = len(self._segments) - 1
@@ -446,6 +459,8 @@ class AWGProgramBuilder:
             loop=seg.loop,
             ops=seg.ops + (op,),
             phase_mode=seg.phase_mode,
+            snap_len_to_quantum=seg.snap_len_to_quantum,
+            snap_freqs_to_wrap=seg.snap_freqs_to_wrap,
         )
 
     def build_intent_ir(self) -> IntentIR:

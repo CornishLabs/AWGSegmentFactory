@@ -477,6 +477,8 @@ def resolve_intent_ir(intent: IntentIR, *, sample_rate_hz: float) -> ResolvedIR:
                 loop=seg.loop,
                 parts=tuple(parts),
                 phase_mode=seg.phase_mode,
+                snap_len_to_quantum=seg.snap_len_to_quantum,
+                snap_freqs_to_wrap=seg.snap_freqs_to_wrap,
             )
         )
 

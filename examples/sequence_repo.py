@@ -141,10 +141,10 @@ def recreate_mol_exp():
         )
         .define("exp_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
         # 1) Initial sync: minimum length, wait for first trigger
-        .segment("sync", mode="wait_trig")
+        .segment("sync", mode="wait_trig", snap_len_to_quantum=False)
             .hold(
                 time=1e-9
-            )  # wait_trig defaults: snap_freqs=True, duration rounded to >=1 sample
+            )  # wait_trig defaults: wrap-snap freqs; snap_len_to_quantum=False keeps trigger latency minimal
         # 2) Loading tweezers on: wait for trigger then output steady tones
         .segment("loading_tweezers_on", mode="wait_trig", phase_mode="optimise")
             .tones("H")

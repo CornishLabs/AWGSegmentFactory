@@ -51,6 +51,9 @@ class ResolvedSegment:
     loop: int
     parts: Tuple[ResolvedPart, ...]
     phase_mode: SegmentPhaseMode = "continue"
+    # Quantization preferences (applied in `quantize_resolved_ir`).
+    snap_len_to_quantum: bool = True
+    snap_freqs_to_wrap: bool = True
 
     @property
     def n_samples(self) -> int:

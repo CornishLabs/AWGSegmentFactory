@@ -33,6 +33,8 @@ class SegmentQuantizationInfo:
     mode: str
     loop: int
     loopable: bool
+    snap_len_to_quantum: bool
+    snap_freqs_to_wrap: bool
     original_samples: int
     quantized_samples: int
     step_samples: int
@@ -244,6 +246,8 @@ def _shift_segment_freqs(
         loop=seg.loop,
         parts=tuple(new_parts),
         phase_mode=seg.phase_mode,
+        snap_len_to_quantum=bool(getattr(seg, "snap_len_to_quantum", True)),
+        snap_freqs_to_wrap=bool(getattr(seg, "snap_freqs_to_wrap", True)),
     )
 
 
@@ -259,8 +263,11 @@ def quantize_resolved_ir(
 
     Rules:
     - All segments: length rounded up to a multiple of `step_samples` (and minimum size)
-    - Loopable segments (wait_trig or loop>1): length rounded to nearest multiple of `quantum_samples`
-      (but at least one quantum), and constant segments get frequency wrap-snapping.
+    - Loopable segments (wait_trig or loop>1):
+      - by default, length rounded to the nearest multiple of `quantum_samples` (but at least one quantum)
+      - if a segment sets `snap_len_to_quantum=False`, it is quantized like a non-loopable segment
+        (step size + minimum size only), which reduces trigger/loop latency.
+      - constant segments get optional frequency wrap-snapping (`snap_freqs_to_wrap=True` by default).
     """
     fs = float(ir.sample_rate_hz)
     missing = [lc for lc in ir.logical_channels if lc not in logical_channel_to_hardware_channel]
@@ -307,11 +314,14 @@ def quantize_resolved_ir(
 
     for seg in ir.segments:
         loopable = (seg.mode == "wait_trig") or (seg.loop > 1)
+        snap_len_to_quantum = bool(getattr(seg, "snap_len_to_quantum", True))
+        snap_freqs_to_wrap = bool(getattr(seg, "snap_freqs_to_wrap", True))
+        use_quantum = loopable and snap_len_to_quantum
         n0 = int(seg.n_samples)
 
         constant = all(_segment_is_constant(seg, lc) for lc in ir.logical_channels)
 
-        if loopable:
+        if use_quantum:
             # For loopable segments, prefer a global "quantum" length. For non-constant
             # segments we only ever round up (never truncate waveform content).
             if constant:
@@ -332,6 +342,8 @@ def quantize_resolved_ir(
                 mode=str(seg.mode),
                 loop=int(seg.loop),
                 loopable=loopable,
+                snap_len_to_quantum=snap_len_to_quantum,
+                snap_freqs_to_wrap=snap_freqs_to_wrap,
                 original_samples=n0,
                 quantized_samples=n1,
                 step_samples=step_samples,
@@ -388,7 +400,7 @@ def quantize_resolved_ir(
                 raise RuntimeError("Failed to trim segment parts correctly")
 
         # For loopable constant segments, snap freqs to wrap for the final length.
-        if loopable and constant:
+        if loopable and constant and snap_freqs_to_wrap:
             seg_len = n1
             new_parts: list[ResolvedPart] = []
             for part in parts:
@@ -419,6 +431,8 @@ def quantize_resolved_ir(
                 loop=seg.loop,
                 parts=tuple(parts),
                 phase_mode=seg.phase_mode,
+                snap_len_to_quantum=snap_len_to_quantum,
+                snap_freqs_to_wrap=snap_freqs_to_wrap,
             )
         )
 

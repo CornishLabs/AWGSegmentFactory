@@ -72,6 +72,13 @@ class IntentSegment:
     loop: int  # for loop_n. For wait_trig set loop=1.
     ops: Tuple["Op", ...]
     phase_mode: SegmentPhaseMode = "continue"
+    # Quantization preferences (applied in `quantize_resolved_ir`):
+    # - `snap_len_to_quantum`: for loopable segments, snap length to the global quantum
+    #   (reduces wrap-snapping error but increases trigger/loop latency).
+    # - `snap_freqs_to_wrap`: for constant, loopable segments, adjust freqs so the segment
+    #   wraps phase-continuously at its quantized length.
+    snap_len_to_quantum: bool = True
+    snap_freqs_to_wrap: bool = True
 
 
 # ---- Ops ----
