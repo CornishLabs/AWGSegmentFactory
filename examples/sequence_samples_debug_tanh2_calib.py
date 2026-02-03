@@ -25,8 +25,12 @@ import numpy as np
 from awgsegmentfactory import AWGProgramBuilder, ResolvedIR
 from awgsegmentfactory.calibration import AODTanh2Calib
 from awgsegmentfactory.debug import sequence_samples_debug
-
-import plot_de_compensation_file as de_fit
+from awgsegmentfactory.optical_power_calibration_fit import (
+    Tanh2PolyFitResult,
+    curves_from_de_rf_calibration_dict,
+    fit_tanh2_poly_model,
+    suggest_amp_scale_from_curves,
+)
 
 
 def _maybe_enable_matplotlib_widget_backend() -> None:
@@ -46,12 +50,9 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
-def _polyval_high_to_low(coeffs_high_to_low: tuple[float, ...], x: float) -> float:
-    c = np.asarray(coeffs_high_to_low, dtype=float).reshape(-1)
-    return float(np.polyval(c, float(x)))
-
-
-def _fit_calibration_file_to_tanh2(path: Path) -> tuple[AODTanh2Calib, dict[str, object], float]:
+def _fit_calibration_file_to_tanh2(
+    path: Path,
+) -> tuple[AODTanh2Calib, Tanh2PolyFitResult, float]:
     """
     Returns (calib, fit_dict, rf_amp_max_mV).
 
@@ -63,57 +64,33 @@ def _fit_calibration_file_to_tanh2(path: Path) -> tuple[AODTanh2Calib, dict[str,
     if not isinstance(de_rf, dict):
         raise ValueError("Expected JSON key 'DE_RF_calibration' to be a dict")
 
-    freqs_mhz, amps_mV, de = de_fit._de_rf_grid(de_rf)
-    fit = de_fit._fit_sat_poly_model(
-        freqs_mhz=freqs_mhz,
-        amps_mV=amps_mV,
-        de=de,
-        degree_g=6,
-        degree_knee=6,
-        sat_model="tanh2",
-    )
-
-    coeffs_g = tuple(float(x) for x in np.asarray(fit["coeffs_g_high_to_low"], dtype=float).tolist())
-    coeffs_v0_a = tuple(float(x) for x in np.asarray(fit["coeffs_a0_high_to_low"], dtype=float).tolist())
-
-    freq_mid_hz = float(fit["freq_mid_mhz"]) * 1e6
-    freq_halfspan_hz = float(fit["freq_halfspan_mhz"]) * 1e6
-
-    rf_amp_max_mV = float(np.max(np.asarray(amps_mV, dtype=float)))
-    if not np.isfinite(rf_amp_max_mV) or rf_amp_max_mV <= 0:
-        raise ValueError("Invalid RF amplitude grid in calibration file")
+    curves = curves_from_de_rf_calibration_dict(de_rf)
+    if not curves:
+        raise ValueError("No usable calibration curves found in DE_RF_calibration")
+    fit = fit_tanh2_poly_model(curves, degree_g=6, degree_v0=6)
 
     # Choose an amp_scale that maps ~max RF amplitude (mV) to ~1.0 (AWG units).
-    amp_scale = 1.0 / rf_amp_max_mV
+    amp_scale = suggest_amp_scale_from_curves(curves)
+    rf_amp_max_mV = 1.0 / float(amp_scale)
 
-    calib = AODTanh2Calib(
-        g_poly_by_logical_channel={"*": coeffs_g},
-        v0_a_poly_by_logical_channel={"*": coeffs_v0_a},
-        freq_mid_hz=freq_mid_hz,
-        freq_halfspan_hz=freq_halfspan_hz,
-        amp_scale=float(amp_scale),
-        # v0 is in mV, so this is in mV^2.
-        min_v0_sq=float(fit["min_u0_mV2"]),
-        y_eps=1e-6,
-    )
+    calib = fit.to_aod_tanh2_calib(g_key="*", amp_scale=float(amp_scale))
     return calib, fit, rf_amp_max_mV
 
 
-def _build_demo_program(*, sample_rate_hz: float, calib: AODTanh2Calib) -> ResolvedIR:
+def _build_demo_program(
+    *,
+    sample_rate_hz: float,
+    calib: AODTanh2Calib,
+    fit: Tanh2PolyFitResult,
+) -> ResolvedIR:
     # Single tone: hold, then linear chirp from 81 MHz -> 119 MHz.
     f_start_hz = 81e6
     f_stop_hz = 119e6
     df_hz = float(f_stop_hz - f_start_hz)
 
-    def g_at(freq_hz: float) -> float:
-        x = (float(freq_hz) - float(calib.freq_mid_hz)) / float(calib.freq_halfspan_hz)
-        x = float(np.clip(x, -1.0, 1.0))
-        g = _polyval_high_to_low(calib.g_poly_by_logical_channel["*"], x)
-        return float(max(g, 1e-6))
-
     # Choose a constant target optical power that is safely below g(freq) over the whole chirp.
     ff = np.linspace(float(f_start_hz), float(f_stop_hz), 257, dtype=float)
-    g_min = float(np.min([g_at(f) for f in ff]))
+    g_min = float(np.min(np.maximum(fit.g_of_freq(ff), 1e-6)))
     power_frac = 0.6
     p_target = float(power_frac) * g_min
 
@@ -132,12 +109,12 @@ def _build_demo_program(*, sample_rate_hz: float, calib: AODTanh2Calib) -> Resol
 
     b.segment("hold", mode="once", phase_mode="manual")
     b.tones("H").use_def("tone")
-    b.hold(time=0.5e-6)
+    b.hold(time=40e-6)
 
     # Keep optical power constant while chirping frequency. The calibration will adjust RF
     # amplitudes across the chirp as g(freq) and v0(freq) vary.
     b.segment("chirp", mode="once", phase_mode="manual")
-    b.tones("H").move(df=df_hz, time=2e-6, kind="linear")
+    b.tones("H").move(df=df_hz, time=200e-6, kind="linear")
 
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 
@@ -159,12 +136,12 @@ def main() -> None:
 
     print("--- AODTanh2Calib (from DE file fit) ---")
     print("file:", cal_path.name)
-    print("fit rmse:", float(fit["rmse"]))
+    print("fit rmse:", float(fit.rmse))
     print("rf_amp_max_mV:", rf_amp_max_mV, "-> amp_scale:", float(calib.amp_scale))
 
     # Use a realistic Spectrum-like sample rate, but keep segment durations short.
     fs = 625e6
-    ir = _build_demo_program(sample_rate_hz=fs, calib=calib)
+    ir = _build_demo_program(sample_rate_hz=fs, calib=calib, fit=fit)
 
     fig, axs, slider = sequence_samples_debug(
         ir,
