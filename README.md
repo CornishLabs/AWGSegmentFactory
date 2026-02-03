@@ -201,3 +201,7 @@ For plotting/state queries there is also a debug view:
 - `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODTanh2Calib`) are consumed during
   `compile_sequence_program(...)` to convert `(freq, optical_power)` → RF synthesis amplitudes. Other
   calibration types are currently stored on `IntentIR.calibrations` for future higher-level ops.
+
+## Roadmap
+
+See `TODO.md`.
