@@ -17,6 +17,8 @@ This package uses `uv` to manage dependencies. To run any of the examples:
 uv run examples/recreate_current.py
 ```
 
+Python requirement: `>=3.13` (see `pyproject.toml`).
+
 ### Restricted environments (optional)
 
 If your environment blocks access to `~/.cache` (e.g. some sandboxes/CI), run uv with a repo-local cache:
@@ -85,6 +87,7 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
 - `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
+  - To convert back to NumPy, use `compiled_sequence_program_to_numpy(...)`.
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -111,7 +114,48 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 - Grid/timeline debug (Jupyter): see `examples/debugging.py`
 - Sample-level debug with segment boundaries (and optional 2D spot grid): see `examples/sequence_samples_debug.py`
 
+## Hardware upload (Spectrum) (optional)
+
+This repo includes working Spectrum examples under `examples/spcm/` (sequence mode, triggers, etc).
+The library function `upload_sequence_program(...)` is a placeholder for a future stable API; today it raises
+`NotImplementedError` for CPU upload and points at `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
+
+## Optical-power calibration (optional)
+
+If you attach an `OpticalPowerToRFAmpCalib` calibration object to the builder, then `amps` in the IR are treated
+as *desired optical power* (arbitrary units), and `compile_sequence_program(...)` converts `(freq, optical_power)`
+to the RF synthesis amplitudes actually used for sample generation.
+
+Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
+- `AODDECalib`: `optical_power ≈ DE(freq) * rf_amp^2` (simple, no saturation).
+- `AODTanh2Calib`: `optical_power ≈ g(freq) * tanh^2(rf_amp / v0(freq))` (smooth saturation, globally invertible).
+
+Examples:
+- `examples/optical_power_calibration_demo.py` (toy DE model, with/without calibration overlay)
+- `examples/fit_optical_power_calibration.py` (fit `AODTanh2Calib` from a DE-compensation JSON file and print a Python constant)
+- `examples/sequence_samples_debug_tanh2_calib.py` (fit tanh² from file, attach to builder, and debug compiled samples)
+
 ## Compilation stages (mental model)
+
+```mermaid
+flowchart LR
+    B[AWGProgramBuilder<br/>fluent API]
+    I[IntentIR<br/>continuous-time ops]
+    R[ResolvedIR<br/>integer-sample parts]
+    Q[QuantizedIR<br/>hardware-aligned segments]
+    C[CompiledSequenceProgram<br/>int16 segments + step table]
+
+    B -->|build_intent_ir| I
+    I -->|resolve_intent_ir| R
+    R -->|quantize_resolved_ir| Q
+    Q -->|compile_sequence_program| C
+
+    B -->|attach (optional)| CAL[calibrations<br/>(e.g. AODTanh2Calib)]
+    CAL -->|used during synthesis| C
+
+    R --> TL[ResolvedTimeline<br/>(debug)]
+    Q --> DBG[debug plots<br/>(sequence_samples_debug)]
+```
 
 1) **Build (intent)** (`src/awgsegmentfactory/builder.py`)
    - `AWGProgramBuilder` records your fluent calls into an `IntentIR` (`build_intent_ir()`).
@@ -129,32 +173,12 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/resolved_timeline.py`) and `ResolvedIR.to_timeline()`
 
-## Structure understanding
+## IR terminology
 
-'IR' means 'Intermediate Representation'.
-
-We call the whole thing we are building up a 'Program'.
-
-The builder defines a fluent API that produces an IR formed of dataclasses. We call this product **intent**
-(what you *want* to happen). It might not necessarily be buildable to real hardware, and it doesn't account
-for later hardware constraints like sequence quantisation and minimum segment sizes.
-
-In this code, that is the `IntentIR` class. This is primarily formed of `IntentSegment`s which contain
-operations (`Op`s) with durations in seconds.
-
-This is then turned into a more verbose, but still logical, implementation plan at this point, some hardware considerations have been made. That is the resolved IR (the IR which is good for compilation) we have:
-A whole program is now represented by:
-`ResolvedIR`, which is formed of `ResolvedSegment`s that themselves are composed of `ResolvedPart`s, which are composed of `ResolvedLogicalChannelPart` (what each logical channel does in this part).
-
-The transformation of an `IntentIR` to a `ResolvedIR` is done by `resolve_intent_ir(intent, sample_rate_hz=...)`.
-
-(to be honest, this is a quite awkward middle ground point...)
-
-This is then further refined to hardware implementation by quantising everything to the quanta dictated by sensible hardware implementation. This is done by `quantize_resolved_ir()`, which maps:
-`ResolvedIR` -> `QuantizedIR` (and includes `SegmentQuantizationInfo`).
-
-Interpretation of the quantized IR to produce samples is done by `compile_sequence_program()`, which maps `QuantizedIR` to `CompiledSequenceProgram`. This contains the 'segments' and 'steps' information in the form of lists of `CompiledSegment` and `SequenceStep` respectively. This maps directly to the nature of the hardware where `[CompiledSegment]` is the data memory, and `[SequenceStep]` is the sequence memory.
-
+- **Intent IR**: continuous-time spec in seconds; “what you want”.
+- **Resolved IR**: sample-quantized primitives (per-part integer sample counts); “what you mean”.
+- **Quantized IR**: hardware-aligned segment lengths + optional wrap snapping; “what you can upload”.
+- **Compiled program**: final int16 segment buffers + step table; “what the card plays”.
 
 ## Repository guide (reading order)
 
@@ -166,10 +190,14 @@ Interpretation of the quantized IR to produce samples is done by `compile_sequen
 6) `src/awgsegmentfactory/quantize.py` – quantisation (`ResolvedIR` → `QuantizedIR`) + wrap snapping.
 7) `src/awgsegmentfactory/synth_samples.py` – synthesis (`QuantizedIR` → `CompiledSequenceProgram`).
 8) `src/awgsegmentfactory/resolved_timeline.py` – debug timeline spans and interpolation.
-9) `src/awgsegmentfactory/debug/` – optional plotting helpers (Jupyter + matplotlib).
+9) `src/awgsegmentfactory/calibration.py` – calibration interfaces and built-in models.
+10) `src/awgsegmentfactory/optical_power_calibration_fit.py` – fitting helpers for `AODTanh2Calib`.
+11) `src/awgsegmentfactory/debug/` – optional plotting helpers (Jupyter + matplotlib).
 
 ## Notes / current limitations
 
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
-- Calibration objects are stored on `IntentIR.calibrations` but not yet consumed by ops.
+- `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODDECalib` / `AODTanh2Calib`) are consumed during
+  `compile_sequence_program(...)` to convert `(freq, optical_power)` → RF synthesis amplitudes. Other
+  calibration types are currently stored on `IntentIR.calibrations` for future higher-level ops.
