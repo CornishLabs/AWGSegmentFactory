@@ -28,6 +28,12 @@ It replaces `plan.md`, which had a mixture of historical design notes and comple
 - [ ] Add small, explicit “hash inputs” helpers for caching (Resolved/Quantized/Compiled)
 - [ ] (Optional) Parallelize segment compilation on CPU (threads/processes) for large programs
 - [ ] Tighten and document endpoint conventions (e.g. chirps/phase integration) where needed
+- [ ] Reduce allocations in synthesis (especially GPU)
+  - Preallocate per-segment output buffers instead of list + `concatenate`
+  - Special-case pure holds to avoid allocating full `(n_samples, n_tones)` arrays
+- [ ] Make crest-factor optimisation more configurable/faster
+  - Expose tuning knobs (passes/grid selection)
+  - Consider caching per `(freqs, amps)` signature when many segments repeat
 
 ## Calibration + modeling
 
@@ -37,8 +43,16 @@ It replaces `plan.md`, which had a mixture of historical design notes and comple
   - Better validation plots and fit-quality checks
   - Import/export helpers for storing “CONST-like” calibration blobs per AOD/channel
 
+## Code health / maintainability
+
+- [ ] Move `LogicalChannelState` out of `src/awgsegmentfactory/resolved_timeline.py` so the “timeline” module can stay debug-only
+- [ ] Refactor `resolve_intent_ir` op handling into a dispatch table (similar to `_INTERP_BY_KIND` in interpolation)
+- [ ] Avoid debug modules importing private compiler helpers (e.g. promote `_interp_logical_channel_part` to a shared internal module)
+- [ ] Improve typing for NumPy/CuPy compatibility (use `Any`/Protocol/ArrayLike where appropriate)
+- [ ] Make the upload API’s stability explicit (mark as experimental or move under an experimental namespace until implemented)
+- [ ] Add unit tests for interpolation edge cases (`geo_ramp` validation, `exp` including τ→0 behavior)
+
 ## Debug / UX
 
 - [ ] Improve debug plots for large tone counts (sampling/decimation, tone coloring, etc.)
 - [ ] Add small CLI wrappers for common calibration/debug tasks (optional)
-
