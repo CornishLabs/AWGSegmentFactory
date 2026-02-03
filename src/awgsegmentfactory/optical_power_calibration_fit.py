@@ -289,6 +289,18 @@ def _fit_freq_norm(curves: Sequence[OpticalPowerCalCurve]) -> tuple[float, float
     return mid, halfspan
 
 
+def _flatten_curves(
+    curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]] | Sequence[OpticalPowerCalCurve],
+) -> list[OpticalPowerCalCurve]:
+    curves: list[OpticalPowerCalCurve] = []
+    if isinstance(curves_by_logical_channel, Mapping):
+        for vv in curves_by_logical_channel.values():
+            curves.extend(list(vv))
+    else:
+        curves.extend(list(curves_by_logical_channel))
+    return curves
+
+
 def fit_tanh2_poly_model(
     curves: Sequence[OpticalPowerCalCurve],
     *,
@@ -337,14 +349,19 @@ def fit_tanh2_poly_model(
 
     a_list = [np.asarray(c.rf_amps_mV, dtype=float).reshape(-1) for c in cleaned]
     p_list = [np.asarray(c.optical_powers, dtype=float).reshape(-1) for c in cleaned]
-    w_list = [
-        (np.ones_like(a, dtype=float) if c.weights is None else np.asarray(c.weights, dtype=float).reshape(-1))
-        for a, c in zip(a_list, cleaned, strict=True)
-    ]
+    w_list: list[np.ndarray] = []
+    for a, c in zip(a_list, cleaned, strict=True):
+        if c.weights is None:
+            w = np.ones_like(a, dtype=float)
+        else:
+            w = np.asarray(c.weights, dtype=float).reshape(-1)
+        w_list.append(w)
 
-    a_all = np.concatenate([a[a > 0] for a in a_list if np.any(a > 0)], axis=0) if a_list else np.array([])
-    if a_all.size == 0:
+    a_pos = [a[a > 0.0] for a in a_list]
+    a_pos = [a for a in a_pos if a.size]
+    if not a_pos:
         raise ValueError("Calibration data contains no positive RF amplitudes")
+    a_all = np.concatenate(a_pos, axis=0)
     a_pos_min = float(np.min(a_all))
     a_pos_max = float(np.max(a_all))
 
@@ -353,8 +370,8 @@ def fit_tanh2_poly_model(
         if coeffs_v0_a.shape != (dv0 + 1,):
             raise ValueError("internal shape mismatch for v0 coefficients")
 
-        a0 = np.polyval(coeffs_v0_a, x)
-        v0 = np.sqrt((a0 * a0) + min_v0_sq)  # (n_freq,)
+        v0_a = np.polyval(coeffs_v0_a, x)
+        v0 = np.sqrt((v0_a * v0_a) + min_v0_sq)  # (n_freq,)
         if not np.all(np.isfinite(v0)):
             return (
                 np.full((dg + 1,), np.nan),
@@ -367,11 +384,11 @@ def fit_tanh2_poly_model(
         denom_by_freq = np.zeros_like(v0, dtype=float)
         for i, (a_i, p_i, w_i) in enumerate(zip(a_list, p_list, w_list, strict=True)):
             sat = np.tanh(a_i / float(v0[i])) ** 2
-            denom = float(np.sum(w_i * sat * sat))
-            denom = max(denom, 1e-30)
+            sat_sq_wsum = float(np.sum(w_i * sat * sat))
+            sat_sq_wsum = max(sat_sq_wsum, 1e-30)
             dot = float(np.sum(w_i * p_i * sat))
-            g_by_freq[i] = dot / denom
-            denom_by_freq[i] = denom
+            g_by_freq[i] = dot / sat_sq_wsum
+            denom_by_freq[i] = sat_sq_wsum
 
         w_freq = np.sqrt(np.maximum(denom_by_freq, 1e-30))
         coeffs_g = np.polyfit(x, g_by_freq, deg=dg, w=w_freq)
@@ -391,6 +408,7 @@ def fit_tanh2_poly_model(
         raise RuntimeError("SciPy is required for fitting optical-power calibration models") from exc
 
     def _initial_v0_const() -> float:
+        # Search a generous range around the observed RF amplitudes.
         lo = float(np.log10(a_pos_min * 1e-3))
         hi = float(np.log10(a_pos_max * 1e3))
 
@@ -458,12 +476,7 @@ def suggest_amp_scale_from_curves(
     curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]] | Sequence[OpticalPowerCalCurve],
 ) -> float:
     """Suggest an `amp_scale` that maps the max RF amplitude (mV) to ~1.0."""
-    curves: list[OpticalPowerCalCurve] = []
-    if isinstance(curves_by_logical_channel, Mapping):
-        for vv in curves_by_logical_channel.values():
-            curves.extend(list(vv))
-    else:
-        curves.extend(list(curves_by_logical_channel))
+    curves = _flatten_curves(curves_by_logical_channel)
     if not curves:
         raise ValueError("No curves provided")
     a_max = 0.0

@@ -54,7 +54,7 @@ def _fit_calibration_file_to_tanh2(
     path: Path,
 ) -> tuple[AODTanh2Calib, Tanh2PolyFitResult, float]:
     """
-    Returns (calib, fit_dict, rf_amp_max_mV).
+    Returns (calib, fit, rf_amp_max_mV).
 
     `rf_amp_max_mV` is useful for choosing a sensible `amp_scale` so the returned RF
     amplitudes land in a comfortable [0,1] AWG amplitude range.

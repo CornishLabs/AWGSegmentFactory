@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Dict, Mapping, Sequence, Tuple
+from typing import Mapping, Sequence
 
 import numpy as np
 
 from ..optical_power_calibration_fit import OpticalPowerCalCurve, Tanh2PolyFitResult
+
+
+def _freq_scale(freq_unit: str) -> float:
+    if freq_unit == "Hz":
+        return 1.0
+    if freq_unit == "kHz":
+        return 1e3
+    if freq_unit == "MHz":
+        return 1e6
+    raise ValueError("freq_unit must be one of {'Hz','kHz','MHz'}")
 
 
 def _try_grid(
@@ -26,7 +36,7 @@ def _try_grid(
         a = np.asarray(c.rf_amps_mV, dtype=float).reshape(-1)
         if a.size != n:
             return None
-        if not np.allclose(a, amps0, rtol=0.0, atol=0.0):
+        if not np.array_equal(a, amps0):
             return None
         grid[i, :] = np.asarray(c.optical_powers, dtype=float).reshape(-1)
     return freqs, amps0, grid
@@ -38,7 +48,7 @@ def plot_tanh2_fit_surfaces(
     *,
     title: str = "Optical-power calibration fit (tanh2)",
     freq_unit: str = "MHz",
-) -> "tuple[object, tuple[object, object, object]]":
+) -> tuple[object, tuple[object, object, object]]:
     """
     Plot data/model/residual as 2D surfaces.
 
@@ -52,9 +62,9 @@ def plot_tanh2_fit_surfaces(
             "plot_tanh2_fit_surfaces requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
-    if freq_unit not in {"Hz", "kHz", "MHz"}:
-        raise ValueError("freq_unit must be one of {'Hz','kHz','MHz'}")
-    f_scale = 1.0 if freq_unit == "Hz" else (1e3 if freq_unit == "kHz" else 1e6)
+    freq_scale_hz = _freq_scale(freq_unit)
+    xlabel = f"RF frequency ({freq_unit})"
+    ylabel = "RF amplitude (mV)"
 
     grid = _try_grid(curves)
     fig, axs = plt.subplots(1, 3, figsize=(16, 4.6), sharex=False, sharey=False)
@@ -71,22 +81,46 @@ def plot_tanh2_fit_surfaces(
         vmax = float(np.nanmax(p))
         rmax = float(np.nanmax(np.abs(resid)))
 
-        im0 = ax0.pcolormesh(freqs_hz / f_scale, amps_mV, p.T, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+        im0 = ax0.pcolormesh(
+            freqs_hz / freq_scale_hz,
+            amps_mV,
+            p.T,
+            shading="auto",
+            cmap="viridis",
+            vmin=vmin,
+            vmax=vmax,
+        )
         ax0.set_title("Data")
-        ax0.set_xlabel(f"RF frequency ({freq_unit})")
-        ax0.set_ylabel("RF amplitude (mV)")
+        ax0.set_xlabel(xlabel)
+        ax0.set_ylabel(ylabel)
         plt.colorbar(im0, ax=ax0, label="Optical power (arb)")
 
-        im1 = ax1.pcolormesh(freqs_hz / f_scale, amps_mV, p_fit.T, shading="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+        im1 = ax1.pcolormesh(
+            freqs_hz / freq_scale_hz,
+            amps_mV,
+            p_fit.T,
+            shading="auto",
+            cmap="viridis",
+            vmin=vmin,
+            vmax=vmax,
+        )
         ax1.set_title("Model")
-        ax1.set_xlabel(f"RF frequency ({freq_unit})")
-        ax1.set_ylabel("RF amplitude (mV)")
+        ax1.set_xlabel(xlabel)
+        ax1.set_ylabel(ylabel)
         plt.colorbar(im1, ax=ax1, label="Optical power (arb)")
 
-        im2 = ax2.pcolormesh(freqs_hz / f_scale, amps_mV, resid.T, shading="auto", cmap="coolwarm", vmin=-rmax, vmax=rmax)
+        im2 = ax2.pcolormesh(
+            freqs_hz / freq_scale_hz,
+            amps_mV,
+            resid.T,
+            shading="auto",
+            cmap="coolwarm",
+            vmin=-rmax,
+            vmax=rmax,
+        )
         ax2.set_title("Residual (data - model)")
-        ax2.set_xlabel(f"RF frequency ({freq_unit})")
-        ax2.set_ylabel("RF amplitude (mV)")
+        ax2.set_xlabel(xlabel)
+        ax2.set_ylabel(ylabel)
         plt.colorbar(im2, ax=ax2, label="Residual (arb)")
     else:
         # Scatter fallback.
@@ -97,22 +131,22 @@ def plot_tanh2_fit_surfaces(
         resid = pp - pp_fit
         rmax = float(np.nanmax(np.abs(resid)))
 
-        sc0 = ax0.scatter(ff / f_scale, aa, c=pp, s=8, cmap="viridis")
+        sc0 = ax0.scatter(ff / freq_scale_hz, aa, c=pp, s=8, cmap="viridis")
         ax0.set_title("Data")
-        ax0.set_xlabel(f"RF frequency ({freq_unit})")
-        ax0.set_ylabel("RF amplitude (mV)")
+        ax0.set_xlabel(xlabel)
+        ax0.set_ylabel(ylabel)
         plt.colorbar(sc0, ax=ax0, label="Optical power (arb)")
 
-        sc1 = ax1.scatter(ff / f_scale, aa, c=pp_fit, s=8, cmap="viridis")
+        sc1 = ax1.scatter(ff / freq_scale_hz, aa, c=pp_fit, s=8, cmap="viridis")
         ax1.set_title("Model")
-        ax1.set_xlabel(f"RF frequency ({freq_unit})")
-        ax1.set_ylabel("RF amplitude (mV)")
+        ax1.set_xlabel(xlabel)
+        ax1.set_ylabel(ylabel)
         plt.colorbar(sc1, ax=ax1, label="Optical power (arb)")
 
-        sc2 = ax2.scatter(ff / f_scale, aa, c=resid, s=8, cmap="coolwarm", vmin=-rmax, vmax=rmax)
+        sc2 = ax2.scatter(ff / freq_scale_hz, aa, c=resid, s=8, cmap="coolwarm", vmin=-rmax, vmax=rmax)
         ax2.set_title("Residual (data - model)")
-        ax2.set_xlabel(f"RF frequency ({freq_unit})")
-        ax2.set_ylabel("RF amplitude (mV)")
+        ax2.set_xlabel(xlabel)
+        ax2.set_ylabel(ylabel)
         plt.colorbar(sc2, ax=ax2, label="Residual (arb)")
 
     fig.suptitle(f"{title}   RMSE={fit.rmse:.4g}  max|res|={fit.max_abs_resid:.4g}")
@@ -125,7 +159,7 @@ def plot_tanh2_fit_parameters(
     *,
     title: str = "Fitted parameters vs frequency",
     freq_unit: str = "MHz",
-) -> "tuple[object, tuple[object, object]]":
+) -> tuple[object, tuple[object, object]]:
     try:
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover
@@ -133,23 +167,22 @@ def plot_tanh2_fit_parameters(
             "plot_tanh2_fit_parameters requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
-    if freq_unit not in {"Hz", "kHz", "MHz"}:
-        raise ValueError("freq_unit must be one of {'Hz','kHz','MHz'}")
-    f_scale = 1.0 if freq_unit == "Hz" else (1e3 if freq_unit == "kHz" else 1e6)
+    freq_scale_hz = _freq_scale(freq_unit)
+    xlabel = f"RF frequency ({freq_unit})"
 
     freqs = np.asarray(fit.freqs_hz, dtype=float).reshape(-1)
     g_fit = np.asarray(fit.g_fit_by_freq, dtype=float).reshape(-1)
     v0 = np.asarray(fit.v0_mV_by_freq, dtype=float).reshape(-1)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(12.5, 3.8), sharex=False)
-    ax0.plot(freqs / f_scale, g_fit, "C0.-", lw=1.5, ms=4)
-    ax0.set_xlabel(f"RF frequency ({freq_unit})")
+    ax0.plot(freqs / freq_scale_hz, g_fit, "C0.-", lw=1.5, ms=4)
+    ax0.set_xlabel(xlabel)
     ax0.set_ylabel("g(freq) (arb)")
     ax0.set_title("g(freq)")
     ax0.grid(True, alpha=0.25)
 
-    ax1.plot(freqs / f_scale, v0, "C1.-", lw=1.5, ms=4)
-    ax1.set_xlabel(f"RF frequency ({freq_unit})")
+    ax1.plot(freqs / freq_scale_hz, v0, "C1.-", lw=1.5, ms=4)
+    ax1.set_xlabel(xlabel)
     ax1.set_ylabel("v0(freq) (mV)")
     ax1.set_title("v0(freq)")
     ax1.grid(True, alpha=0.25)
@@ -166,7 +199,7 @@ def plot_tanh2_fit_slices(
     n_slices: int = 5,
     title: str = "Slices: optical power vs RF amplitude",
     freq_unit: str = "MHz",
-) -> "tuple[object, object]":
+) -> tuple[object, object]:
     try:
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover
@@ -180,9 +213,7 @@ def plot_tanh2_fit_slices(
     if n_slices <= 0:
         raise ValueError("n_slices must be > 0")
 
-    if freq_unit not in {"Hz", "kHz", "MHz"}:
-        raise ValueError("freq_unit must be one of {'Hz','kHz','MHz'}")
-    f_scale = 1.0 if freq_unit == "Hz" else (1e3 if freq_unit == "kHz" else 1e6)
+    freq_scale_hz = _freq_scale(freq_unit)
 
     curves_sorted = sorted(curves, key=lambda c: float(c.freq_hz))
     idxs = np.unique(np.linspace(0, len(curves_sorted) - 1, n_slices, dtype=int))
@@ -193,7 +224,7 @@ def plot_tanh2_fit_slices(
         a = np.asarray(c.rf_amps_mV, dtype=float).reshape(-1)
         p = np.asarray(c.optical_powers, dtype=float).reshape(-1)
         pred = fit.predict(np.full_like(a, float(c.freq_hz)), a)
-        f_label = float(c.freq_hz) / f_scale
+        f_label = float(c.freq_hz) / freq_scale_hz
         ax.plot(a, p, ".", ms=4, alpha=0.6, label=f"{f_label:.2f} {freq_unit} data")
         ax.plot(a, pred, "-", lw=1.8, alpha=0.9, label=f"{f_label:.2f} {freq_unit} model")
 
@@ -212,7 +243,7 @@ def plot_tanh2_fit_report(
     *,
     title: str = "Optical-power calibration fit (tanh2)",
     freq_unit: str = "MHz",
-) -> Tuple[object, object, object]:
+) -> tuple[object, object, object]:
     """Convenience: surfaces + parameter traces + slices."""
     fig0, _ = plot_tanh2_fit_surfaces(curves, fit, title=title, freq_unit=freq_unit)
     fig1, _ = plot_tanh2_fit_parameters(fit, freq_unit=freq_unit)
@@ -226,9 +257,9 @@ def plot_tanh2_fit_report_by_logical_channel(
     *,
     title: str = "Optical-power calibration fits (tanh2)",
     freq_unit: str = "MHz",
-) -> Dict[str, Tuple[object, object, object]]:
+) -> dict[str, tuple[object, object, object]]:
     """Generate a report per logical channel."""
-    out: Dict[str, Tuple[object, object, object]] = {}
+    out: dict[str, tuple[object, object, object]] = {}
     for lc, curves in curves_by_logical_channel.items():
         if lc not in fits_by_logical_channel:
             raise KeyError(f"Missing fit for logical_channel {lc!r}")
@@ -239,4 +270,3 @@ def plot_tanh2_fit_report_by_logical_channel(
             freq_unit=freq_unit,
         )
     return out
-
