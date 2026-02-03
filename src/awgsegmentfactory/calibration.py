@@ -162,8 +162,3 @@ class AODTanh2Calib(OpticalPowerToRFAmpCalib):
         rf_amp = v0 * xp.arctanh(xp.sqrt(y))
         return float(self.amp_scale) * rf_amp
 
-
-class AODCalib:
-    """Placeholder for future AOD calibration models (deprecated)."""
-
-    pass
