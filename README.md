@@ -139,22 +139,22 @@ Examples:
 
 ```mermaid
 flowchart LR
-    B[AWGProgramBuilder<br/>fluent API]
-    I[IntentIR<br/>continuous-time ops]
-    R[ResolvedIR<br/>integer-sample parts]
-    Q[QuantizedIR<br/>hardware-aligned segments]
-    C[CompiledSequenceProgram<br/>int16 segments + step table]
+    B[AWGProgramBuilder]
+    I[IntentIR]
+    R[ResolvedIR]
+    Q[QuantizedIR]
+    C[CompiledSequenceProgram]
 
-    B -->|build_intent_ir| I
-    I -->|resolve_intent_ir| R
-    R -->|quantize_resolved_ir| Q
-    Q -->|compile_sequence_program| C
+    B -- build_intent_ir --> I
+    I -- resolve_intent_ir --> R
+    R -- quantize_resolved_ir --> Q
+    Q -- compile_sequence_program --> C
 
-    B -->|attach (optional)| CAL[calibrations<br/>(e.g. AODTanh2Calib)]
-    CAL -->|used during synthesis| C
+    B -- attach calibration --> CAL[Calibrations: AODTanh2Calib]
+    CAL -- used during synthesis --> C
 
-    R --> TL[ResolvedTimeline<br/>(debug)]
-    Q --> DBG[debug plots<br/>(sequence_samples_debug)]
+    R -- to_timeline --> TL[ResolvedTimeline]
+    Q -- debug --> DBG[sequence_samples_debug]
 ```
 
 1) **Build (intent)** (`src/awgsegmentfactory/builder.py`)
