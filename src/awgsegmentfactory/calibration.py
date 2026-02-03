@@ -75,55 +75,6 @@ def _polyval_horner(coeffs_high_to_low: Tuple[float, ...], x: Any, *, xp: Any) -
 
 
 @dataclass(frozen=True)
-class AODDECalib(OpticalPowerToRFAmpCalib):
-    """
-    First-order diffraction-efficiency calibration.
-
-    Model (per logical channel):
-        optical_power ≈ DE(freq) * rf_power
-
-    With a fixed load impedance, rf_power ∝ rf_amp^2, so we use:
-        rf_amp = amp_scale * sqrt(optical_power / DE(freq))
-
-    `DE(freq)` is provided as a polynomial in `x = freq_hz / freq_scale_hz` with coefficients
-    ordered high->low (same convention as `numpy.polyval`).
-    """
-
-    de_poly_by_logical_channel: Dict[str, Tuple[float, ...]]
-    freq_scale_hz: float = 1e6  # evaluate polynomial in "MHz" by default
-    amp_scale: float = 1.0
-    min_de: float = 1e-12
-
-    def _coeffs(self, logical_channel: str) -> Tuple[float, ...]:
-        if logical_channel in self.de_poly_by_logical_channel:
-            return self.de_poly_by_logical_channel[logical_channel]
-        if "*" in self.de_poly_by_logical_channel:
-            return self.de_poly_by_logical_channel["*"]
-        if len(self.de_poly_by_logical_channel) == 1:
-            return next(iter(self.de_poly_by_logical_channel.values()))
-        raise KeyError(
-            f"AODDECalib: no DE polynomial for logical_channel {logical_channel!r} "
-            f"(available: {sorted(self.de_poly_by_logical_channel.keys())})"
-        )
-
-    def rf_amps(
-        self,
-        freqs_hz: Any,
-        optical_powers: Any,
-        *,
-        logical_channel: str,
-        xp: Any = np,
-    ) -> Any:
-        f = xp.asarray(freqs_hz, dtype=float)
-        p_opt = xp.asarray(optical_powers, dtype=float)
-        x = f / float(self.freq_scale_hz)
-        de = _polyval_horner(self._coeffs(str(logical_channel)), x, xp=xp)
-        de = xp.maximum(de, float(self.min_de))
-        rf_power = xp.maximum(p_opt, 0.0) / de
-        return float(self.amp_scale) * xp.sqrt(rf_power)
-
-
-@dataclass(frozen=True)
 class AODTanh2Calib(OpticalPowerToRFAmpCalib):
     """
     First-order diffraction-efficiency calibration with smooth saturation.
@@ -213,6 +164,6 @@ class AODTanh2Calib(OpticalPowerToRFAmpCalib):
 
 
 class AODCalib:
-    """Placeholder for future AOD calibration models (deprecated by `AODDECalib`)."""
+    """Placeholder for future AOD calibration models (deprecated)."""
 
     pass

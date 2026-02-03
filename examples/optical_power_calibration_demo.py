@@ -1,11 +1,11 @@
 """
 Example: first-order optical-power calibration.
 
-This demonstrates `OpticalPowerToRFAmpCalib` via `AODDECalib`, where:
+This demonstrates `OpticalPowerToRFAmpCalib` via `AODTanh2Calib`, where:
   - `amps` in the IR represent *desired optical power* (arbitrary units)
   - sample synthesis converts `(freq, optical_power)` -> RF synthesis amplitude
 
-The example first plots a simple model of OpticalPower(freq, RF_amp) as a contour plot.
+The example first plots a simple saturating model of OpticalPower(freq, RF_amp) as a contour plot.
 Then it compiles a 1-tone program with and without the calibration and overlays the
 resulting waveforms.
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.calibration import AODDECalib
+from awgsegmentfactory.calibration import AODTanh2Calib
 from awgsegmentfactory.quantize import quantize_resolved_ir
 from awgsegmentfactory.synth_samples import compile_sequence_program
 
@@ -26,11 +26,11 @@ def _build_one_tone(
     f_hz: float,
     optical_power: float,
     use_calibration: bool,
-    calib: AODDECalib,
+    calib: AODTanh2Calib,
 ):
     b = AWGProgramBuilder().logical_channel("H")
     if use_calibration:
-        b.with_calibration("aod_de", calib)
+        b.with_calibration("aod_tanh2", calib)
 
     b.define(
         "tone",
@@ -53,15 +53,23 @@ def main() -> None:
             "This example requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
-    # A toy diffraction-efficiency model for demo purposes:
-    #   de(freq) = polyval(coeffs, freq_hz / 1e6)   (freq in MHz)
-    # Choose a gentle quadratic around 100 MHz.
-    de_poly = (115, -296, 165, -42, 4)  # high->low, like numpy.polyval
-    calib = AODDECalib(
-        de_poly_by_logical_channel={"H": de_poly},
-        freq_scale_hz=100e6,
+    # A toy saturating model for demo purposes:
+    #   optical_power(freq, rf_amp) = g(freq) * tanh^2(rf_amp / v0(freq))
+    #
+    # `AODTanh2Calib` inverts this to map (freq, optical_power) -> rf_amp.
+    #
+    # Use x = (freq - mid)/halfspan as the polynomial coordinate (clamped in the calibration).
+    g_poly = (-0.1, 0.0, 0.8)  # g(x) = 0.8 - 0.1 x^2  (high->low like numpy.polyval)
+    v0_a_poly = (0.05, 0.35)  # v0_a(x) = 0.35 + 0.05 x  (kept > 0 over [-1,1])
+    calib = AODTanh2Calib(
+        g_poly_by_logical_channel={"H": g_poly},
+        v0_a_poly_by_logical_channel={"H": v0_a_poly},
+        freq_mid_hz=100e6,
+        freq_halfspan_hz=20e6,
         amp_scale=1.0,
-        min_de=1e-6,
+        min_g=1e-6,
+        min_v0_sq=1e-12,
+        y_eps=1e-6,
     )
 
     # ---- 1) Contour: OpticalPower(freq, RF_amp) ----
@@ -69,9 +77,13 @@ def main() -> None:
     rf_amp = np.linspace(0.0, 1.0, 301, dtype=float)
     F_hz, A = np.meshgrid(freqs_hz, rf_amp, indexing="xy")
 
-    de = np.polyval(np.array(de_poly, dtype=float), F_hz / float(calib.freq_scale_hz))
-    de = np.maximum(de, float(calib.min_de))
-    optical_power = de * (A / float(calib.amp_scale)) ** 2
+    x = (F_hz - float(calib.freq_mid_hz)) / float(calib.freq_halfspan_hz)
+    x = np.clip(x, -1.0, 1.0)
+    g = np.polyval(np.asarray(g_poly, dtype=float), x)
+    g = np.maximum(g, float(calib.min_g))
+    v0_a = np.polyval(np.asarray(v0_a_poly, dtype=float), x)
+    v0 = np.sqrt((v0_a * v0_a) + float(calib.min_v0_sq))
+    optical_power = g * (np.tanh(A / (float(calib.amp_scale) * v0)) ** 2)
 
     fig0, ax0 = plt.subplots(figsize=(8, 4))
     levels = 40
@@ -79,10 +91,10 @@ def main() -> None:
     fig0.colorbar(cs, ax=ax0, label="Optical power (arb)")
     ax0.set_xlabel("RF frequency (MHz)")
     ax0.set_ylabel("RF drive amplitude (arb)")
-    ax0.set_title("Toy optical-power model: OpticalPower(freq, RF_amp)")
+    ax0.set_title("Toy optical-power model: g(freq) * tanh^2(RF_amp / v0(freq))")
 
     # Overlay the RF amplitude needed to achieve a constant optical power target.
-    p_target = 0.25
+    p_target = 0.6
     a_needed = calib.rf_amps(
         freqs_hz, np.full_like(freqs_hz, p_target), logical_channel="H", xp=np
     )
@@ -150,4 +162,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

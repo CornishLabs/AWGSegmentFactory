@@ -127,11 +127,11 @@ as *desired optical power* (arbitrary units), and `compile_sequence_program(...)
 to the RF synthesis amplitudes actually used for sample generation.
 
 Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
-- `AODDECalib`: `optical_power ≈ DE(freq) * rf_amp^2` (simple, no saturation).
 - `AODTanh2Calib`: `optical_power ≈ g(freq) * tanh^2(rf_amp / v0(freq))` (smooth saturation, globally invertible).
+  - Small-signal limit: `tanh(z)≈z`, so `optical_power ≈ (g/v0^2) * rf_amp^2` (the usual square-law model).
 
 Examples:
-- `examples/optical_power_calibration_demo.py` (toy DE model, with/without calibration overlay)
+- `examples/optical_power_calibration_demo.py` (toy tanh² model, with/without calibration overlay)
 - `examples/fit_optical_power_calibration.py` (fit `AODTanh2Calib` from a DE-compensation JSON file and print a Python constant)
 - `examples/sequence_samples_debug_tanh2_calib.py` (fit tanh² from file, attach to builder, and debug compiled samples)
 
@@ -198,6 +198,6 @@ For plotting/state queries there is also a debug view:
 
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
-- `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODDECalib` / `AODTanh2Calib`) are consumed during
+- `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODTanh2Calib`) are consumed during
   `compile_sequence_program(...)` to convert `(freq, optical_power)` → RF synthesis amplitudes. Other
   calibration types are currently stored on `IntentIR.calibrations` for future higher-level ops.
