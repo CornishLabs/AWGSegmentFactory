@@ -1,7 +1,7 @@
 """
 Example: first-order optical-power calibration.
 
-This demonstrates `OpticalPowerToRFAmpCalib` via `AODTanh2Calib`, where:
+This demonstrates `OpticalPowerToRFAmpCalib` via `AODSin2Calib`, where:
   - `amps` in the IR represent *desired optical power* (arbitrary units)
   - sample synthesis converts `(freq, optical_power)` -> RF synthesis amplitude
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
-from awgsegmentfactory.calibration import AODTanh2Calib
+from awgsegmentfactory.calibration import AODSin2Calib
 from awgsegmentfactory.quantize import quantize_resolved_ir
 from awgsegmentfactory.synth_samples import compile_sequence_program
 
@@ -26,11 +26,11 @@ def _build_one_tone(
     f_hz: float,
     optical_power: float,
     use_calibration: bool,
-    calib: AODTanh2Calib,
+    calib: AODSin2Calib,
 ):
     b = AWGProgramBuilder().logical_channel("H")
     if use_calibration:
-        b.with_calibration("aod_tanh2", calib)
+        b.with_calibration("aod_sin2", calib)
 
     b.define(
         "tone",
@@ -54,14 +54,14 @@ def main() -> None:
         ) from exc
 
     # A toy saturating model for demo purposes:
-    #   optical_power(freq, rf_amp) = g(freq) * tanh^2(rf_amp / v0(freq))
+    #   optical_power(freq, rf_amp) = g(freq) * sin^2((π/2) * rf_amp / v0(freq))
     #
-    # `AODTanh2Calib` inverts this to map (freq, optical_power) -> rf_amp.
+    # `AODSin2Calib` inverts this to map (freq, optical_power) -> rf_amp.
     #
     # Use x = (freq - mid)/halfspan as the polynomial coordinate (clamped in the calibration).
     g_poly = (-0.1, 0.0, 0.8)  # g(x) = 0.8 - 0.1 x^2  (high->low like numpy.polyval)
-    v0_a_poly = (0.05, 0.35)  # v0_a(x) = 0.35 + 0.05 x  (kept > 0 over [-1,1])
-    calib = AODTanh2Calib(
+    v0_a_poly = (0.1, 1.3)  # v0_a(x) = 1.3 + 0.1 x  (kept > 0 over [-1,1])
+    calib = AODSin2Calib(
         g_poly_by_logical_channel={"H": g_poly},
         v0_a_poly_by_logical_channel={"H": v0_a_poly},
         freq_mid_hz=100e6,
@@ -83,7 +83,7 @@ def main() -> None:
     g = np.maximum(g, float(calib.min_g))
     v0_a = np.polyval(np.asarray(v0_a_poly, dtype=float), x)
     v0 = np.sqrt((v0_a * v0_a) + float(calib.min_v0_sq))
-    optical_power = g * (np.tanh(A / (float(calib.amp_scale) * v0)) ** 2)
+    optical_power = g * (np.sin((0.5 * np.pi) * (A / (float(calib.amp_scale) * v0))) ** 2)
 
     fig0, ax0 = plt.subplots(figsize=(8, 4))
     levels = 40
@@ -91,7 +91,7 @@ def main() -> None:
     fig0.colorbar(cs, ax=ax0, label="Optical power (arb)")
     ax0.set_xlabel("RF frequency (MHz)")
     ax0.set_ylabel("RF drive amplitude (arb)")
-    ax0.set_title("Toy optical-power model: g(freq) * tanh^2(RF_amp / v0(freq))")
+    ax0.set_title("Toy optical-power model: g(freq) * sin^2((π/2) * RF_amp / v0(freq))")
 
     # Overlay the RF amplitude needed to achieve a constant optical power target.
     p_target = 0.6

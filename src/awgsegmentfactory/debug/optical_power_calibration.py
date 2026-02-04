@@ -6,7 +6,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from ..optical_power_calibration_fit import OpticalPowerCalCurve, Tanh2PolyFitResult
+from ..optical_power_calibration_fit import OpticalPowerCalCurve, Sin2PolyFitResult
 
 
 def _freq_scale(freq_unit: str) -> float:
@@ -42,11 +42,11 @@ def _try_grid(
     return freqs, amps0, grid
 
 
-def plot_tanh2_fit_surfaces(
+def plot_sin2_fit_surfaces(
     curves: Sequence[OpticalPowerCalCurve],
-    fit: Tanh2PolyFitResult,
+    fit: Sin2PolyFitResult,
     *,
-    title: str = "Optical-power calibration fit (tanh2)",
+    title: str = "Optical-power calibration fit (sin2)",
     freq_unit: str = "MHz",
 ) -> tuple[object, tuple[object, object, object]]:
     """
@@ -59,7 +59,7 @@ def plot_tanh2_fit_surfaces(
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
-            "plot_tanh2_fit_surfaces requires matplotlib. Install the `dev` dependency group."
+            "plot_sin2_fit_surfaces requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
     freq_scale_hz = _freq_scale(freq_unit)
@@ -154,8 +154,8 @@ def plot_tanh2_fit_surfaces(
     return fig, (ax0, ax1, ax2)
 
 
-def plot_tanh2_fit_parameters(
-    fit: Tanh2PolyFitResult,
+def plot_sin2_fit_parameters(
+    fit: Sin2PolyFitResult,
     *,
     title: str = "Fitted parameters vs frequency",
     freq_unit: str = "MHz",
@@ -164,7 +164,7 @@ def plot_tanh2_fit_parameters(
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
-            "plot_tanh2_fit_parameters requires matplotlib. Install the `dev` dependency group."
+            "plot_sin2_fit_parameters requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
     freq_scale_hz = _freq_scale(freq_unit)
@@ -192,9 +192,9 @@ def plot_tanh2_fit_parameters(
     return fig, (ax0, ax1)
 
 
-def plot_tanh2_fit_slices(
+def plot_sin2_fit_slices(
     curves: Sequence[OpticalPowerCalCurve],
-    fit: Tanh2PolyFitResult,
+    fit: Sin2PolyFitResult,
     *,
     n_slices: int = 5,
     title: str = "Slices: optical power vs RF amplitude",
@@ -204,7 +204,7 @@ def plot_tanh2_fit_slices(
         import matplotlib.pyplot as plt
     except ModuleNotFoundError as exc:  # pragma: no cover
         raise ModuleNotFoundError(
-            "plot_tanh2_fit_slices requires matplotlib. Install the `dev` dependency group."
+            "plot_sin2_fit_slices requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
     if not curves:
@@ -237,25 +237,25 @@ def plot_tanh2_fit_slices(
     return fig, ax
 
 
-def plot_tanh2_fit_report(
+def plot_sin2_fit_report(
     curves: Sequence[OpticalPowerCalCurve],
-    fit: Tanh2PolyFitResult,
+    fit: Sin2PolyFitResult,
     *,
-    title: str = "Optical-power calibration fit (tanh2)",
+    title: str = "Optical-power calibration fit (sin2)",
     freq_unit: str = "MHz",
 ) -> tuple[object, object, object]:
     """Convenience: surfaces + parameter traces + slices."""
-    fig0, _ = plot_tanh2_fit_surfaces(curves, fit, title=title, freq_unit=freq_unit)
-    fig1, _ = plot_tanh2_fit_parameters(fit, freq_unit=freq_unit)
-    fig2, _ = plot_tanh2_fit_slices(curves, fit, freq_unit=freq_unit)
+    fig0, _ = plot_sin2_fit_surfaces(curves, fit, title=title, freq_unit=freq_unit)
+    fig1, _ = plot_sin2_fit_parameters(fit, freq_unit=freq_unit)
+    fig2, _ = plot_sin2_fit_slices(curves, fit, freq_unit=freq_unit)
     return fig0, fig1, fig2
 
 
-def plot_tanh2_fit_report_by_logical_channel(
+def plot_sin2_fit_report_by_logical_channel(
     curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]],
-    fits_by_logical_channel: Mapping[str, Tanh2PolyFitResult],
+    fits_by_logical_channel: Mapping[str, Sin2PolyFitResult],
     *,
-    title: str = "Optical-power calibration fits (tanh2)",
+    title: str = "Optical-power calibration fits (sin2)",
     freq_unit: str = "MHz",
 ) -> dict[str, tuple[object, object, object]]:
     """Generate a report per logical channel."""
@@ -263,7 +263,7 @@ def plot_tanh2_fit_report_by_logical_channel(
     for lc, curves in curves_by_logical_channel.items():
         if lc not in fits_by_logical_channel:
             raise KeyError(f"Missing fit for logical_channel {lc!r}")
-        out[str(lc)] = plot_tanh2_fit_report(
+        out[str(lc)] = plot_sin2_fit_report(
             curves,
             fits_by_logical_channel[lc],
             title=f"{title} [{lc}]",

@@ -127,13 +127,13 @@ as *desired optical power* (arbitrary units), and `compile_sequence_program(...)
 to the RF synthesis amplitudes actually used for sample generation.
 
 Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
-- `AODTanh2Calib`: `optical_power ≈ g(freq) * tanh^2(rf_amp / v0(freq))` (smooth saturation, globally invertible).
-  - Small-signal limit: `tanh(z)≈z`, so `optical_power ≈ (g/v0^2) * rf_amp^2` (the usual square-law model).
+- `AODSin2Calib`: `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (vendor-style saturation; invertible on the first lobe).
+  - Small-signal limit: `sin(z)≈z`, so `optical_power ≈ g * ((π/2) * rf_amp / v0)^2` (square-law).
 
 Examples:
-- `examples/optical_power_calibration_demo.py` (toy tanh² model, with/without calibration overlay)
-- `examples/fit_optical_power_calibration.py` (fit `AODTanh2Calib` from a DE-compensation JSON file and print a Python constant)
-- `examples/sequence_samples_debug_tanh2_calib.py` (fit tanh² from file, attach to builder, and debug compiled samples)
+- `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
+- `examples/fit_optical_power_calibration.py` (fit `AODSin2Calib` from a calibration file and print a Python constant)
+- `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, attach to builder, and debug compiled samples)
 
 ## Compilation stages (mental model)
 
@@ -150,7 +150,7 @@ flowchart LR
     R -- quantize_resolved_ir --> Q
     Q -- compile_sequence_program --> C
 
-    B -- attach calibration --> CAL[Calibrations: AODTanh2Calib]
+    B -- attach calibration --> CAL[Calibrations: AODSin2Calib]
     CAL -- used during synthesis --> C
 
     R -- to_timeline --> TL[ResolvedTimeline]
@@ -191,14 +191,14 @@ For plotting/state queries there is also a debug view:
 7) `src/awgsegmentfactory/synth_samples.py` – synthesis (`QuantizedIR` → `CompiledSequenceProgram`).
 8) `src/awgsegmentfactory/resolved_timeline.py` – debug timeline spans and interpolation.
 9) `src/awgsegmentfactory/calibration.py` – calibration interfaces and built-in models.
-10) `src/awgsegmentfactory/optical_power_calibration_fit.py` – fitting helpers for `AODTanh2Calib`.
+10) `src/awgsegmentfactory/optical_power_calibration_fit.py` – fitting helpers for `AODSin2Calib`.
 11) `src/awgsegmentfactory/debug/` – optional plotting helpers (Jupyter + matplotlib).
 
 ## Notes / current limitations
 
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
-- `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODTanh2Calib`) are consumed during
+- `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODSin2Calib`) are consumed during
   `compile_sequence_program(...)` to convert `(freq, optical_power)` → RF synthesis amplitudes. Other
   calibration types are currently stored on `IntentIR.calibrations` for future higher-level ops.
 

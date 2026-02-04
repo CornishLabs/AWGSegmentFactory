@@ -38,7 +38,7 @@ It replaces `plan.md`, which had a mixture of historical design notes and comple
 ## Calibration + modeling
 
 - [ ] Integrate `PositionToFreqCalib` into higher-level builder ops (e.g. `move_dx_um(...)`)
-- [ ] Expand `AODTanh2Calib` fit tooling for lab workflows
+- [ ] Expand `AODSin2Calib` fit tooling for lab workflows
   - Robust fitting (outlier handling / weighting)
   - Better validation plots and fit-quality checks
   - Import/export helpers for storing “CONST-like” calibration blobs per AOD/channel

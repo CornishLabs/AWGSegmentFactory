@@ -75,23 +75,29 @@ def _polyval_horner(coeffs_high_to_low: Tuple[float, ...], x: Any, *, xp: Any) -
 
 
 @dataclass(frozen=True)
-class AODTanh2Calib(OpticalPowerToRFAmpCalib):
+class AODSin2Calib(OpticalPowerToRFAmpCalib):
     """
-    First-order diffraction-efficiency calibration with smooth saturation.
+    First-order diffraction-efficiency calibration using the vendor-style sin² response.
 
-    Model (per logical channel):
-        optical_power ≈ g(freq) * tanh^2(rf_amp / v0(freq))
+    Vendor note (for input power P_in below a saturation/π-power P_sat):
+        DE ≈ sin^2( (π/2) * sqrt(P_in / P_sat) )
+
+    If RF drive power is proportional to voltage² (typical into a fixed impedance),
+    and your measured axis is RF voltage amplitude, then sqrt(P_in/P_sat) becomes
+    `rf_amp / rf_amp_sat`. This yields the model:
+
+        optical_power ≈ g(freq) * sin^2( (π/2) * rf_amp / v0(freq) )
 
     Using x = (freq_hz - mid_hz) / halfspan_hz and polynomials in x:
         g(freq)  = polyval(g_poly, x)
         v0(freq) = sqrt(polyval(v0_a_poly, x)^2 + min_v0_sq)
 
     Inversion (used to synthesize RF amplitudes from desired optical powers):
-        rf_amp = amp_scale * v0(freq) * arctanh(sqrt(optical_power / g(freq)))
+        rf_amp = amp_scale * v0(freq) * (2/π) * arcsin(sqrt(optical_power / g(freq)))
 
     Notes:
-    - This is globally invertible for optical_power in [0, g(freq)), and is monotone in rf_amp >= 0.
-    - For numerical stability we clamp the ratio optical_power/g into [0, 1-eps).
+    - This is globally invertible for optical_power in [0, g(freq)] if you restrict to the
+      first lobe (rf_amp ∈ [0, v0]). For robustness, we clamp optical_power/g into [0, 1-eps).
     - Designed to support both NumPy (`xp=np`) and CuPy (`xp=cupy`).
     """
 
@@ -128,7 +134,7 @@ class AODTanh2Calib(OpticalPowerToRFAmpCalib):
         if len(coeffs_by_logical_channel) == 1:
             return next(iter(coeffs_by_logical_channel.values()))
         raise KeyError(
-            "AODTanh2Calib: no coefficients for logical_channel "
+            "AODSin2Calib: no coefficients for logical_channel "
             f"{logical_channel!r} (available: {sorted(coeffs_by_logical_channel.keys())})"
         )
 
@@ -144,7 +150,6 @@ class AODTanh2Calib(OpticalPowerToRFAmpCalib):
         p_opt = xp.asarray(optical_powers, dtype=float)
 
         x = (f - float(self.freq_mid_hz)) / float(self.freq_halfspan_hz)
-        # Avoid runaway polynomial extrapolation if users pass slightly out-of-range freqs.
         x = xp.clip(x, -1.0, 1.0)
 
         g = _polyval_horner(self._coeffs(self.g_poly_by_logical_channel, str(logical_channel)), x, xp=xp)
@@ -159,6 +164,5 @@ class AODTanh2Calib(OpticalPowerToRFAmpCalib):
 
         y = xp.maximum(p_opt, 0.0) / g
         y = xp.clip(y, 0.0, 1.0 - float(self.y_eps))
-        rf_amp = v0 * xp.arctanh(xp.sqrt(y))
+        rf_amp = v0 * (2.0 / float(np.pi)) * xp.arcsin(xp.sqrt(y))
         return float(self.amp_scale) * rf_amp
-

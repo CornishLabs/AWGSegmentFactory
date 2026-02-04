@@ -7,8 +7,8 @@ This module provides reusable tooling for *building those calibrations* from mea
 data of the form:
   (rf_freq_hz, rf_amp_mV) -> optical_power
 
-The main supported model is a smooth, globally-invertible saturation curve:
-  optical_power(freq, a) ≈ g(freq) * tanh^2(a / v0(freq))
+The supported model is the vendor-style sin² saturation curve:
+  optical_power(freq, a) ≈ g(freq) * sin^2((π/2) * a / v0(freq))
 
 with `g(freq)` and `v0(freq)` each represented as low-degree polynomials in a
 normalized frequency coordinate.
@@ -21,7 +21,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence, Tuple
 
 import numpy as np
 
-from .calibration import AODTanh2Calib
+from .calibration import AODSin2Calib
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,8 @@ def curves_from_point_cloud(
     rf_amps_mV: Any,
     optical_powers: Any,
     freq_round_hz: float | None = None,
+    min_points_per_curve: int = 1,
+    max_points_per_curve: int | None = None,
     clamp_power_nonnegative: bool = True,
 ) -> tuple[OpticalPowerCalCurve, ...]:
     """
@@ -145,14 +147,38 @@ def curves_from_point_cloud(
     else:
         f_key = f
 
+    min_pts = int(min_points_per_curve)
+    if min_pts < 1:
+        raise ValueError("min_points_per_curve must be >= 1")
+
+    max_pts: int | None
+    if max_points_per_curve is None:
+        max_pts = None
+    else:
+        max_pts = int(max_points_per_curve)
+        if max_pts < 1:
+            raise ValueError("max_points_per_curve must be >= 1")
+
     uniq_f, inv = np.unique(f_key, return_inverse=True)
     curves: list[OpticalPowerCalCurve] = []
     for i, ff in enumerate(uniq_f):
         mask = inv == i
         curve = OpticalPowerCalCurve(freq_hz=float(ff), rf_amps_mV=a[mask], optical_powers=p[mask])
         curve = curve.cleaned(clamp_power_nonnegative=clamp_power_nonnegative)
-        if curve.rf_amps_mV.size > 0:
-            curves.append(curve)
+        if curve.rf_amps_mV.size < min_pts:
+            continue
+        if max_pts is not None and curve.rf_amps_mV.size > max_pts:
+            n = int(curve.rf_amps_mV.size)
+            idx = np.linspace(0, n - 1, max_pts)
+            idx = np.unique(np.round(idx).astype(int))
+            w = None if curve.weights is None else np.asarray(curve.weights, dtype=float)[idx]
+            curve = OpticalPowerCalCurve(
+                freq_hz=float(curve.freq_hz),
+                rf_amps_mV=np.asarray(curve.rf_amps_mV, dtype=float)[idx],
+                optical_powers=np.asarray(curve.optical_powers, dtype=float)[idx],
+                weights=w,
+            )
+        curves.append(curve)
     curves.sort(key=lambda c: float(c.freq_hz))
     return tuple(curves)
 
@@ -176,9 +202,92 @@ def curves_from_de_rf_calibration_dict(de_rf: Mapping[str, Any]) -> tuple[Optica
     return tuple(curves)
 
 
+def curves_from_awgde_dict(
+    awgde: Mapping[str, Any],
+    *,
+    freq_round_hz: float = 0.5e6,
+    max_power_levels: int | None = 300,
+    min_points_per_curve: int = 20,
+    max_points_per_curve: int | None = 300,
+) -> tuple[OpticalPowerCalCurve, ...]:
+    """
+    Adapter for `.awgde` calibration JSON files.
+
+    Observed structure:
+      {
+        "0.123": {
+          "Frequency (MHz)": [...],
+          "RF Amplitude (mV)": [...],
+        },
+        ...
+      }
+
+    where each top-level key is an *optical power* (or proxy like diffraction efficiency)
+    and each value is an iso-power curve of (freq, rf_amp) points.
+
+    We convert this to a scattered point cloud (freq_hz, rf_amp_mV, optical_power) and
+    then group into per-frequency `OpticalPowerCalCurve` objects.
+    """
+    if not awgde:
+        return tuple()
+
+    power_items: list[tuple[float, str]] = []
+    for k in awgde.keys():
+        try:
+            power_items.append((float(k), str(k)))
+        except Exception:
+            continue
+    power_items.sort(key=lambda t: float(t[0]))
+    if not power_items:
+        return tuple()
+
+    if max_power_levels is not None and len(power_items) > int(max_power_levels):
+        n = len(power_items)
+        m = int(max_power_levels)
+        if m < 2:
+            raise ValueError("max_power_levels must be >= 2 when provided")
+        idx = np.linspace(0, n - 1, m)
+        idx = np.unique(np.round(idx).astype(int))
+        power_items = [power_items[i] for i in idx.tolist()]
+
+    freqs_chunks: list[np.ndarray] = []
+    amps_chunks: list[np.ndarray] = []
+    power_chunks: list[np.ndarray] = []
+    for power, key in power_items:
+        entry = awgde[key]
+        try:
+            f_mhz = np.asarray(entry["Frequency (MHz)"], dtype=float).reshape(-1)
+            a_mV = np.asarray(entry["RF Amplitude (mV)"], dtype=float).reshape(-1)
+        except Exception as exc:
+            raise ValueError(f"Invalid .awgde entry for key {key!r}") from exc
+        if f_mhz.shape != a_mV.shape:
+            raise ValueError(f".awgde entry shape mismatch for key {key!r}: {f_mhz.shape} vs {a_mV.shape}")
+        if f_mhz.size == 0:
+            continue
+        freqs_chunks.append(f_mhz * 1e6)
+        amps_chunks.append(a_mV)
+        power_chunks.append(np.full_like(a_mV, float(power), dtype=float))
+
+    if not freqs_chunks:
+        return tuple()
+
+    freqs_hz = np.concatenate(freqs_chunks, axis=0)
+    rf_amps_mV = np.concatenate(amps_chunks, axis=0)
+    optical_powers = np.concatenate(power_chunks, axis=0)
+
+    return curves_from_point_cloud(
+        freqs_hz=freqs_hz,
+        rf_amps_mV=rf_amps_mV,
+        optical_powers=optical_powers,
+        freq_round_hz=float(freq_round_hz),
+        min_points_per_curve=int(min_points_per_curve),
+        max_points_per_curve=max_points_per_curve,
+        clamp_power_nonnegative=True,
+    )
+
 @dataclass(frozen=True)
-class Tanh2PolyFitResult:
-    """Fit result for `optical_power ≈ g(freq) * tanh^2(amp / v0(freq))`."""
+class Sin2PolyFitResult:
+    """Fit result for `optical_power ≈ g(freq) * sin^2((π/2) * amp / v0(freq))`."""
 
     degree_g: int
     degree_v0: int
@@ -224,9 +333,9 @@ class Tanh2PolyFitResult:
         g = np.polyval(np.asarray(self.coeffs_g_high_to_low, dtype=float), x)
         a0 = np.polyval(np.asarray(self.coeffs_v0_a_high_to_low, dtype=float), x)
         v0 = np.sqrt((a0 * a0) + float(self.min_v0_sq_mV2))
-        return g * (np.tanh(a / v0) ** 2)
+        return g * (np.sin((0.5 * np.pi) * (a / v0)) ** 2)
 
-    def to_aod_tanh2_calib(
+    def to_aod_sin2_calib(
         self,
         *,
         g_key: str = "*",
@@ -234,11 +343,11 @@ class Tanh2PolyFitResult:
         amp_scale: float,
         min_g: float = 1e-12,
         y_eps: float = 1e-6,
-    ) -> AODTanh2Calib:
-        """Build an `AODTanh2Calib` suitable for the synthesis pipeline."""
+    ) -> AODSin2Calib:
+        """Build an `AODSin2Calib` suitable for the synthesis pipeline."""
         if v0_key is None:
             v0_key = g_key
-        return AODTanh2Calib(
+        return AODSin2Calib(
             g_poly_by_logical_channel={str(g_key): tuple(float(x) for x in self.coeffs_g_high_to_low)},
             v0_a_poly_by_logical_channel={str(v0_key): tuple(float(x) for x in self.coeffs_v0_a_high_to_low)},
             freq_mid_hz=float(self.freq_mid_hz),
@@ -252,7 +361,7 @@ class Tanh2PolyFitResult:
     def to_dict(self) -> Dict[str, Any]:
         """JSON-friendly representation (arrays become lists)."""
         return {
-            "model": "tanh2_poly",
+            "model": "sin2_poly",
             "degree_g": int(self.degree_g),
             "degree_v0": int(self.degree_v0),
             "freq_mid_hz": float(self.freq_mid_hz),
@@ -301,7 +410,7 @@ def _flatten_curves(
     return curves
 
 
-def fit_tanh2_poly_model(
+def fit_sin2_poly_model(
     curves: Sequence[OpticalPowerCalCurve],
     *,
     degree_g: int = 6,
@@ -311,12 +420,12 @@ def fit_tanh2_poly_model(
     clamp_power_nonnegative: bool = True,
     min_v0_sq_mV2: float = 1e-9,
     maxiter: int = 250,
-) -> Tanh2PolyFitResult:
+) -> Sin2PolyFitResult:
     """
-    Fit a tanh² saturation surface with frequency-dependent polynomials.
+    Fit a sin² saturation surface with frequency-dependent polynomials.
 
-    The optimisation variable is the v0 polynomial (internally parameterized to enforce v0>0);
-    the g polynomial is solved by least squares per frequency then re-fit as a polynomial each step.
+    Model:
+      optical_power(freq, a) ≈ g(freq) * sin^2((π/2) * a / v0(freq))
     """
     dg = _validate_degree("degree_g", degree_g)
     dv0 = _validate_degree("degree_v0", degree_v0)
@@ -383,7 +492,7 @@ def fit_tanh2_poly_model(
         g_by_freq = np.zeros_like(v0, dtype=float)
         denom_by_freq = np.zeros_like(v0, dtype=float)
         for i, (a_i, p_i, w_i) in enumerate(zip(a_list, p_list, w_list, strict=True)):
-            sat = np.tanh(a_i / float(v0[i])) ** 2
+            sat = np.sin((0.5 * np.pi) * (a_i / float(v0[i]))) ** 2
             sat_sq_wsum = float(np.sum(w_i * sat * sat))
             sat_sq_wsum = max(sat_sq_wsum, 1e-30)
             dot = float(np.sum(w_i * p_i * sat))
@@ -396,11 +505,16 @@ def fit_tanh2_poly_model(
 
         sse = 0.0
         for i, (a_i, p_i, w_i) in enumerate(zip(a_list, p_list, w_list, strict=True)):
-            sat = np.tanh(a_i / float(v0[i])) ** 2
+            sat = np.sin((0.5 * np.pi) * (a_i / float(v0[i]))) ** 2
             resid = p_i - float(g_fit[i]) * sat
             sse += float(np.sum(w_i * resid * resid))
 
-        return np.asarray(coeffs_g, dtype=float), np.asarray(g_fit, dtype=float), np.asarray(v0, dtype=float), float(sse)
+        return (
+            np.asarray(coeffs_g, dtype=float),
+            np.asarray(g_fit, dtype=float),
+            np.asarray(v0, dtype=float),
+            float(sse),
+        )
 
     try:
         from scipy.optimize import minimize, minimize_scalar  # type: ignore
@@ -408,7 +522,6 @@ def fit_tanh2_poly_model(
         raise RuntimeError("SciPy is required for fitting optical-power calibration models") from exc
 
     def _initial_v0_const() -> float:
-        # Search a generous range around the observed RF amplitudes.
         lo = float(np.log10(a_pos_min * 1e-3))
         hi = float(np.log10(a_pos_max * 1e3))
 
@@ -443,16 +556,15 @@ def fit_tanh2_poly_model(
     coeffs_v0_a_best = np.asarray(opt.x, dtype=float)
     coeffs_g, g_fit_by_freq, v0_by_freq, sse = eval_for_coeffs_v0_a(coeffs_v0_a_best)
 
-    # Compute summary error metrics (unweighted, pointwise).
     resid_all: list[np.ndarray] = []
     for i, (a_i, p_i) in enumerate(zip(a_list, p_list, strict=True)):
-        sat = np.tanh(a_i / float(v0_by_freq[i])) ** 2
+        sat = np.sin((0.5 * np.pi) * (a_i / float(v0_by_freq[i]))) ** 2
         resid_all.append(p_i - float(g_fit_by_freq[i]) * sat)
     resid = np.concatenate(resid_all, axis=0) if resid_all else np.array([0.0], dtype=float)
     rmse = float(np.sqrt(np.mean(resid * resid)))
     max_abs = float(np.max(np.abs(resid)))
 
-    return Tanh2PolyFitResult(
+    return Sin2PolyFitResult(
         degree_g=int(dg),
         degree_v0=int(dv0),
         freq_mid_hz=float(mid),
@@ -488,7 +600,7 @@ def suggest_amp_scale_from_curves(
     return 1.0 / float(a_max)
 
 
-def fit_tanh2_poly_model_by_logical_channel(
+def fit_sin2_poly_model_by_logical_channel(
     curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]],
     *,
     degree_g: int = 6,
@@ -497,9 +609,9 @@ def fit_tanh2_poly_model_by_logical_channel(
     clamp_power_nonnegative: bool = True,
     min_v0_sq_mV2: float = 1e-9,
     maxiter: int = 250,
-) -> tuple[Dict[str, Tanh2PolyFitResult], float, float]:
+) -> tuple[Dict[str, Sin2PolyFitResult], float, float]:
     """
-    Fit one tanh² calibration per logical channel.
+    Fit one sin² calibration per logical channel.
 
     Returns (fits_by_channel, freq_mid_hz, freq_halfspan_hz).
     If `shared_freq_norm=True`, all channel fits share the same frequency normalization.
@@ -518,10 +630,10 @@ def fit_tanh2_poly_model_by_logical_channel(
     else:
         mid, halfspan = (float("nan"), float("nan"))
 
-    fits: Dict[str, Tanh2PolyFitResult] = {}
+    fits: Dict[str, Sin2PolyFitResult] = {}
     for lc, curves in curves_by_logical_channel.items():
         if shared_freq_norm:
-            fit = fit_tanh2_poly_model(
+            fit = fit_sin2_poly_model(
                 curves,
                 degree_g=degree_g,
                 degree_v0=degree_v0,
@@ -532,7 +644,7 @@ def fit_tanh2_poly_model_by_logical_channel(
                 maxiter=maxiter,
             )
         else:
-            fit = fit_tanh2_poly_model(
+            fit = fit_sin2_poly_model(
                 curves,
                 degree_g=degree_g,
                 degree_v0=degree_v0,
@@ -545,26 +657,20 @@ def fit_tanh2_poly_model_by_logical_channel(
     if shared_freq_norm:
         return fits, float(mid), float(halfspan)
 
-    # Derive a "representative" norm from the first fit if not shared.
     first = next(iter(fits.values()))
     return fits, float(first.freq_mid_hz), float(first.freq_halfspan_hz)
 
 
-def build_aod_tanh2_calib_from_fits(
-    fits_by_logical_channel: Mapping[str, Tanh2PolyFitResult],
+def build_aod_sin2_calib_from_fits(
+    fits_by_logical_channel: Mapping[str, Sin2PolyFitResult],
     *,
     amp_scale: float,
     min_g: float = 1e-12,
     y_eps: float = 1e-6,
     atol_freq_norm_hz: float = 1e-6,
     atol_min_v0_sq_mV2: float = 0.0,
-) -> AODTanh2Calib:
-    """
-    Build a single `AODTanh2Calib` from per-channel fit results.
-
-    This is convenient when one physical AOD has multiple RF channels (e.g. X/Y),
-    but you want to attach a single calibration object to the program.
-    """
+) -> AODSin2Calib:
+    """Build a single `AODSin2Calib` from per-channel fit results."""
     if not fits_by_logical_channel:
         raise ValueError("fits_by_logical_channel is empty")
 
@@ -598,7 +704,7 @@ def build_aod_tanh2_calib_from_fits(
         g_poly[str(lc)] = tuple(float(x) for x in fit.coeffs_g_high_to_low)
         v0_poly[str(lc)] = tuple(float(x) for x in fit.coeffs_v0_a_high_to_low)
 
-    return AODTanh2Calib(
+    return AODSin2Calib(
         g_poly_by_logical_channel=g_poly,
         v0_a_poly_by_logical_channel=v0_poly,
         freq_mid_hz=mid,
@@ -610,10 +716,11 @@ def build_aod_tanh2_calib_from_fits(
     )
 
 
-def aod_tanh2_calib_to_python(
-    calib: AODTanh2Calib, *, var_name: str = "AOD_TANH2_CALIB"
+def aod_sin2_calib_to_python(
+    calib: AODSin2Calib, *, var_name: str = "AOD_SIN2_CALIB"
 ) -> str:
-    """Format an `AODTanh2Calib` as a Python constant snippet."""
+    """Format an `AODSin2Calib` as a Python constant snippet."""
+
     def _fmt_tuple(vals: Iterable[float]) -> str:
         vv = tuple(float(v) for v in vals)
         suffix = "," if len(vv) == 1 else ""
@@ -628,7 +735,7 @@ def aod_tanh2_calib_to_python(
 
     return "\n".join(
         [
-            f"{var_name} = AODTanh2Calib(",
+            f"{var_name} = AODSin2Calib(",
             "    g_poly_by_logical_channel={",
             *g_lines,
             "    },",

@@ -12,8 +12,8 @@ __all__ = [
     "interactive_grid_debug",
     "LinearFreqToPos",
     "sequence_samples_debug",
-    "plot_tanh2_fit_report",
-    "plot_tanh2_fit_report_by_logical_channel",
+    "plot_sin2_fit_report",
+    "plot_sin2_fit_report_by_logical_channel",
     "PipelineTimings",
     "benchmark_builder_pipeline",
     "compile_builder_pipeline_timed",
@@ -23,8 +23,8 @@ __all__ = [
 if TYPE_CHECKING:  # pragma: no cover
     from .plot import LinearFreqToPos, interactive_grid_debug
     from .optical_power_calibration import (
-        plot_tanh2_fit_report,
-        plot_tanh2_fit_report_by_logical_channel,
+        plot_sin2_fit_report,
+        plot_sin2_fit_report_by_logical_channel,
     )
     from .perf import (
         PipelineTimings,
@@ -49,15 +49,15 @@ def __getattr__(name: str):
         from .samples import sequence_samples_debug
 
         return sequence_samples_debug
-    if name in {"plot_tanh2_fit_report", "plot_tanh2_fit_report_by_logical_channel"}:
+    if name in {"plot_sin2_fit_report", "plot_sin2_fit_report_by_logical_channel"}:
         from .optical_power_calibration import (
-            plot_tanh2_fit_report,
-            plot_tanh2_fit_report_by_logical_channel,
+            plot_sin2_fit_report,
+            plot_sin2_fit_report_by_logical_channel,
         )
 
         return {
-            "plot_tanh2_fit_report": plot_tanh2_fit_report,
-            "plot_tanh2_fit_report_by_logical_channel": plot_tanh2_fit_report_by_logical_channel,
+            "plot_sin2_fit_report": plot_sin2_fit_report,
+            "plot_sin2_fit_report_by_logical_channel": plot_sin2_fit_report_by_logical_channel,
         }[name]
     if name in {
         "PipelineTimings",
