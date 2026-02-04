@@ -109,12 +109,12 @@ def _build_demo_program(
 
     b.segment("hold", mode="once", phase_mode="manual")
     b.tones("H").use_def("tone")
-    b.hold(time=40e-6)
+    b.hold(time=1e-6)
 
     # Keep optical power constant while chirping frequency. The calibration will adjust RF
     # amplitudes across the chirp as g(freq) and v0(freq) vary.
     b.segment("chirp", mode="once", phase_mode="manual")
-    b.tones("H").move(df=df_hz, time=200e-6, kind="linear")
+    b.tones("H").move(df=df_hz, time=4e-6, kind="linear")
 
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 
