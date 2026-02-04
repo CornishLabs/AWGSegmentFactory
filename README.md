@@ -130,9 +130,15 @@ Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
 - `AODSin2Calib`: `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (vendor-style saturation; invertible on the first lobe).
   - Small-signal limit: `sin(z)≈z`, so `optical_power ≈ g * ((π/2) * rf_amp / v0)^2` (square-law).
 
+Typical workflow:
+1) Record calibration data from your setup (either per-frequency `DE vs RF amplitude` curves or iso-power `(freq, amp)` points).
+2) Fit an `AODSin2Calib` and save/import the constants in your experiment code.
+3) Attach the calibration via `.with_calibration("aod_sin2", calib)` so `amps` in the IR mean optical power during compilation.
+
 Examples:
 - `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
 - `examples/fit_optical_power_calibration.py` (fit `AODSin2Calib` from a calibration file and print a Python constant)
+- `examples/fit_all_calibrations_in_examples.py` (fit all files in `examples/calibrations/` and write `examples/calibrations/sin2_calibration_constants.py`)
 - `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, attach to builder, and debug compiled samples)
 
 ## Compilation stages (mental model)
