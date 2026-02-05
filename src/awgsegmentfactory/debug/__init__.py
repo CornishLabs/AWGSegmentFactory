@@ -12,6 +12,10 @@ __all__ = [
     "interactive_grid_debug",
     "LinearFreqToPos",
     "sequence_samples_debug",
+    "format_intent_ir",
+    "format_resolved_ir",
+    "format_quantized_ir",
+    "format_ir",
     "plot_sin2_fit_report",
     "plot_sin2_fit_report_by_logical_channel",
     "PipelineTimings",
@@ -22,6 +26,7 @@ __all__ = [
 
 if TYPE_CHECKING:  # pragma: no cover
     from .plot import LinearFreqToPos, interactive_grid_debug
+    from .ir import format_intent_ir, format_resolved_ir, format_quantized_ir, format_ir
     from .optical_power_calibration import (
         plot_sin2_fit_report,
         plot_sin2_fit_report_by_logical_channel,
@@ -37,6 +42,15 @@ if TYPE_CHECKING:  # pragma: no cover
 
 def __getattr__(name: str):
     """Lazy-load debug helpers to avoid importing heavy optional dependencies."""
+    if name in {"format_intent_ir", "format_resolved_ir", "format_quantized_ir", "format_ir"}:
+        from .ir import format_intent_ir, format_ir, format_quantized_ir, format_resolved_ir
+
+        return {
+            "format_intent_ir": format_intent_ir,
+            "format_resolved_ir": format_resolved_ir,
+            "format_quantized_ir": format_quantized_ir,
+            "format_ir": format_ir,
+        }[name]
     if name in {"interactive_grid_debug", "LinearFreqToPos"}:
         from .plot import LinearFreqToPos, interactive_grid_debug
 
