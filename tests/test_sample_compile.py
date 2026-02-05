@@ -370,27 +370,18 @@ class TestSampleCompile(unittest.TestCase):
             ),
             phase_mode="manual",
         )
-        ir_uncal = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg0,))
-        ir_cal = ResolvedIR(
-            sample_rate_hz=fs,
-            logical_channels=("H",),
-            segments=(seg0,),
-            calibrations={"scale": _ScaleOpticalPowerToRFAmpCalib(2.0)},
-        )
-        q_uncal = quantize_resolved_ir(
-            ir_uncal,
-            logical_channel_to_hardware_channel={"H": 0},
-        )
-        q_cal = quantize_resolved_ir(
-            ir_cal,
-            logical_channel_to_hardware_channel={"H": 0},
-        )
+        ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg0,))
+        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
         full_scale = 20000
         prog_uncal = compile_sequence_program(
-            q_uncal, gain=1.0, clip=1.0, full_scale=full_scale
+            q, gain=1.0, clip=1.0, full_scale=full_scale
         )
         prog_cal = compile_sequence_program(
-            q_cal, gain=1.0, clip=1.0, full_scale=full_scale
+            q,
+            gain=1.0,
+            clip=1.0,
+            full_scale=full_scale,
+            optical_power_calib=_ScaleOpticalPowerToRFAmpCalib(2.0),
         )
         self.assertEqual(int(prog_uncal.segments[0].data_i16[0, 0]), 2000)
         self.assertEqual(int(prog_cal.segments[0].data_i16[0, 0]), 4000)
@@ -425,7 +416,6 @@ class TestSampleCompile(unittest.TestCase):
             sample_rate_hz=fs,
             logical_channels=("H",),
             segments=(seg0,),
-            calibrations={"scale": _ScaleOpticalPowerToRFAmpCalib(3.0)},
         )
         q = quantize_resolved_ir(
             ir,
@@ -443,6 +433,12 @@ class TestSampleCompile(unittest.TestCase):
             "awgsegmentfactory.synth_samples._optimise_phases_for_crest",
             side_effect=fake_opt,
         ):
-            compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000)
+            compile_sequence_program(
+                q,
+                gain=1.0,
+                clip=1.0,
+                full_scale=20000,
+                optical_power_calib=_ScaleOpticalPowerToRFAmpCalib(3.0),
+            )
 
         np.testing.assert_allclose(captured["amps"], np.array([0.3, 0.6], dtype=float))

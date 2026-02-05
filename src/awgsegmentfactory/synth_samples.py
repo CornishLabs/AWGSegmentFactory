@@ -63,25 +63,6 @@ class _PhaseContinueState:
     phases_rad: np.ndarray  # (n_tones,) end-of-segment phases
 
 
-def _select_optical_power_calib(
-    calibrations: dict[str, object],
-) -> Optional[OpticalPowerToRFAmpCalib]:
-    """Pick the unique `OpticalPowerToRFAmpCalib` from `calibrations` (or None)."""
-    matches: list[tuple[str, OpticalPowerToRFAmpCalib]] = []
-    for k, v in dict(calibrations).items():
-        if isinstance(v, OpticalPowerToRFAmpCalib):
-            matches.append((str(k), v))
-    if not matches:
-        return None
-    if len(matches) > 1:
-        keys = ", ".join(repr(k) for k, _ in matches)
-        raise ValueError(
-            f"Multiple OpticalPowerToRFAmpCalib calibrations attached ({keys}); "
-            "expected at most one."
-        )
-    return matches[0][1]
-
-
 def _match_tones_by_frequency(
     prev_freqs_hz: np.ndarray,
     cur_freqs_hz: np.ndarray,
@@ -470,12 +451,20 @@ def compile_sequence_program(
     gain: float,
     clip: float,
     full_scale: int,
+    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     gpu: bool = False,
     output: Literal["numpy", "cupy"] = "numpy",
 ) -> CompiledSequenceProgram:
     """
     Compile a QuantizedIR into per-segment, per-channel int16 sample arrays suitable
     for writing into an AWG "sequence mode" pattern memory.
+
+    Optical-power calibration (optional):
+    - If `optical_power_calib` is provided, `amps` in the IR are interpreted as desired
+      optical power (or a proxy), and are converted to RF synthesis amplitudes during
+      sample synthesis.
+    - If `optical_power_calib is None`, `amps` are treated as direct RF synthesis
+      amplitudes.
 
     GPU mode (`gpu=True`):
     - Uses CuPy for the inner synthesis math in `_synth_part`:
@@ -506,7 +495,7 @@ def compile_sequence_program(
     q_ir = quantized.resolved_ir
     logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
     q_info = quantized.quantization
-    amp_calib = _select_optical_power_calib(getattr(q_ir, "calibrations", {}))
+    amp_calib = optical_power_calib
 
     missing = [lc for lc in q_ir.logical_channels if lc not in logical_channel_to_hardware_channel]
     if missing:

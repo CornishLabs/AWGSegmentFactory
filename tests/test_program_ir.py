@@ -83,7 +83,6 @@ class TestProgramIR(unittest.TestCase):
                     ),
                 ),
             ),
-            calibrations={},
         )
 
         ir = resolve_intent_ir(intent, sample_rate_hz=fs)

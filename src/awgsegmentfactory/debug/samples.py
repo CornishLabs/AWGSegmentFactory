@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ..calibration import OpticalPowerToRFAmpCalib
 from ..resolved_ir import ResolvedIR
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
 from ..synth_samples import (
@@ -150,6 +151,7 @@ def sequence_samples_debug(
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
+    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     channels: Optional[Sequence[int]] = None,
     window_samples: Optional[int] = None,
     show_slider: Optional[bool] = None,
@@ -202,7 +204,11 @@ def sequence_samples_debug(
     elif isinstance(program, QuantizedIR):
         q_ir = program.resolved_ir
         compiled = compile_sequence_program(
-            program, gain=gain, clip=clip, full_scale=full_scale
+            program,
+            gain=gain,
+            clip=clip,
+            full_scale=full_scale,
+            optical_power_calib=optical_power_calib,
         )
     else:
         if logical_channel_to_hardware_channel is None:
@@ -219,6 +225,7 @@ def sequence_samples_debug(
             gain=gain,
             clip=clip,
             full_scale=full_scale,
+            optical_power_calib=optical_power_calib,
         )
     need_params = bool(show_param_traces) or bool(show_spot_grid)
     if need_params and q_ir is None:

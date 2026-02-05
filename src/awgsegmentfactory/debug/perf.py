@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, Sequence
+from typing import Callable, Optional, Sequence
 
 from ..builder import AWGProgramBuilder
+from ..calibration import OpticalPowerToRFAmpCalib
 from ..resolve import resolve_intent_ir
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
 from ..quantize import quantize_resolved_ir
@@ -29,6 +30,7 @@ def compile_builder_pipeline_timed(
     *,
     sample_rate_hz: float,
     logical_channel_to_hardware_channel: ChannelMap,
+    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
@@ -52,6 +54,7 @@ def compile_builder_pipeline_timed(
         gain=gain,
         clip=clip,
         full_scale=full_scale,
+        optical_power_calib=optical_power_calib,
         gpu=gpu,
     )
     if gpu:
@@ -80,6 +83,7 @@ def benchmark_builder_pipeline(
     *,
     sample_rate_hz: float,
     logical_channel_to_hardware_channel: ChannelMap,
+    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     iters: int = 5,
     warmup: int = 1,
     gain: float = 1.0,
@@ -107,6 +111,7 @@ def benchmark_builder_pipeline(
             builder,
             sample_rate_hz=sample_rate_hz,
             logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
+            optical_power_calib=optical_power_calib,
             gain=gain,
             clip=clip,
             full_scale=full_scale,

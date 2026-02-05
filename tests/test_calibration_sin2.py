@@ -76,12 +76,16 @@ class TestAODSin2Calib(unittest.TestCase):
             sample_rate_hz=fs,
             logical_channels=("H",),
             segments=(seg0,),
-            calibrations={"sin2": calib},
         )
         q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
-        prog = compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=full_scale)
+        prog = compile_sequence_program(
+            q,
+            gain=1.0,
+            clip=1.0,
+            full_scale=full_scale,
+            optical_power_calib=calib,
+        )
 
         expected_amp = float((2.0 / np.pi) * np.arcsin(np.sqrt(0.25)))
         expected_i16 = int(np.rint(expected_amp * float(full_scale)))
         self.assertEqual(int(prog.segments[0].data_i16[0, 0]), expected_i16)
-

@@ -6,7 +6,7 @@ containing parts with integer `n_samples` and per-logical-channel interpolation 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Tuple
 
 from .intent_ir import InterpSpec, SegmentMode, SegmentPhaseMode
@@ -74,7 +74,6 @@ class ResolvedIR:
     sample_rate_hz: float
     logical_channels: Tuple[str, ...]
     segments: Tuple[ResolvedSegment, ...]
-    calibrations: Dict[str, object] = field(default_factory=dict)
 
     @property
     def n_samples(self) -> int:

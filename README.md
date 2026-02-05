@@ -122,8 +122,8 @@ The library function `upload_sequence_program(...)` is a placeholder for a futur
 
 ## Optical-power calibration (optional)
 
-If you attach an `OpticalPowerToRFAmpCalib` calibration object to the builder, then `amps` in the IR are treated
-as *desired optical power* (arbitrary units), and `compile_sequence_program(...)` converts `(freq, optical_power)`
+If you pass an `OpticalPowerToRFAmpCalib` calibration object to `compile_sequence_program(...)`, then `amps` in the
+IR are treated as *desired optical power* (arbitrary units), and sample synthesis converts `(freq, optical_power)`
 to the RF synthesis amplitudes actually used for sample generation.
 
 Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
@@ -133,13 +133,13 @@ Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
 Typical workflow:
 1) Record calibration data from your setup (either per-frequency `DE vs RF amplitude` curves or iso-power `(freq, amp)` points).
 2) Fit an `AODSin2Calib` and save/import the constants in your experiment code.
-3) Attach the calibration via `.with_calibration("aod_sin2", calib)` so `amps` in the IR mean optical power during compilation.
+3) Pass the calibration at compile time via `compile_sequence_program(..., optical_power_calib=calib)`.
 
 Examples:
 - `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
 - `examples/fit_optical_power_calibration.py` (fit `AODSin2Calib` from a calibration file and print a Python constant)
 - `examples/fit_all_calibrations_in_examples.py` (fit all files in `examples/calibrations/` and write `examples/calibrations/sin2_calibration_constants.py`)
-- `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, attach to builder, and debug compiled samples)
+- `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, compile with calibration, and debug samples)
 
 ## Compilation stages (mental model)
 
@@ -156,8 +156,7 @@ flowchart LR
     R -- quantize_resolved_ir --> Q
     Q -- compile_sequence_program --> C
 
-    B -- attach calibration --> CAL[Calibrations: AODSin2Calib]
-    CAL -- used during synthesis --> C
+    CAL[Calibrations: AODSin2Calib] --> C
 
     R -- to_timeline --> TL[ResolvedTimeline]
     Q -- debug --> DBG[sequence_samples_debug]
@@ -205,8 +204,7 @@ For plotting/state queries there is also a debug view:
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
 - `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODSin2Calib`) are consumed during
-  `compile_sequence_program(...)` to convert `(freq, optical_power)` → RF synthesis amplitudes. Other
-  calibration types are currently stored on `IntentIR.calibrations` for future higher-level ops.
+  `compile_sequence_program(..., optical_power_calib=...)` to convert `(freq, optical_power)` → RF synthesis amplitudes.
 
 ## Roadmap
 

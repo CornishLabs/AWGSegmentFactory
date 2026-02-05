@@ -6,8 +6,9 @@ This demonstrates an end-to-end flow:
 2) Fit a smooth, monotone saturation model:
      DE(freq, a_mV) ≈ g(freq) * sin^2((π/2) * a_mV / v0(freq))
 3) Build an `AODSin2Calib` from the fitted polynomials
-4) Attach it to an `AWGProgramBuilder` so `amps` in the IR represent *optical power*
-   (or DE proxy), while sample synthesis uses calibrated RF amplitudes.
+4) Pass it to `compile_sequence_program(..., optical_power_calib=...)` so `amps` in
+   the IR represent *optical power* (or DE proxy), while sample synthesis uses
+   calibrated RF amplitudes.
 5) Visualize the compiled samples + segment boundaries.
 
 In Jupyter, you may want:
@@ -80,7 +81,6 @@ def _fit_calibration_file_to_sin2(
 def _build_demo_program(
     *,
     sample_rate_hz: float,
-    calib: AODSin2Calib,
     fit: Sin2PolyFitResult,
 ) -> ResolvedIR:
     # Single tone: hold, then linear chirp from 81 MHz -> 119 MHz.
@@ -97,7 +97,6 @@ def _build_demo_program(
     b = (
         AWGProgramBuilder()
         .logical_channel("H")
-        .with_calibration("aod_sin2", calib)
         .define(
             "tone",
             logical_channel="H",
@@ -145,17 +144,18 @@ def main() -> None:
 
     # Use a realistic Spectrum-like sample rate, but keep segment durations short.
     fs = 625e6
-    ir = _build_demo_program(sample_rate_hz=fs, calib=calib, fit=fit)
+    ir = _build_demo_program(sample_rate_hz=fs, fit=fit)
 
     fig, axs, slider = sequence_samples_debug(
         ir,
         logical_channel_to_hardware_channel={"H": 0},
+        optical_power_calib=calib,
         wait_trig_loops=3,
         include_wrap_preview=True,
         window_samples=None,
         show_slider=False,
         show_markers=True,
-        title="Sequence samples (AODSin2Calib attached)",
+        title="Sequence samples (AODSin2Calib compile-time calibration)",
     )
 
     import matplotlib.pyplot as plt

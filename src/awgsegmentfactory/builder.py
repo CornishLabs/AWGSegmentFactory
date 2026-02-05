@@ -278,12 +278,6 @@ class AWGProgramBuilder:
         self._definitions: Dict[str, IntentDefinition] = {}
         self._segments: List[IntentSegment] = []
         self._current_seg: Optional[int] = None
-        self._calibrations: Dict[str, Any] = {}
-
-    def with_calibration(self, key: str, obj: Any) -> "AWGProgramBuilder":
-        """Attach an arbitrary calibration object to the resulting `IntentIR`."""
-        self._calibrations[key] = obj
-        return self
 
     def logical_channel(self, name: str) -> "AWGProgramBuilder":
         """Register a logical channel name (e.g. "H", "V") used by ops/definitions."""
@@ -471,7 +465,6 @@ class AWGProgramBuilder:
             logical_channels=tuple(self._logical_channels),
             definitions=dict(self._definitions),
             segments=tuple(self._segments),
-            calibrations=dict(self._calibrations),
         )
 
     def build_timeline(self, *, sample_rate_hz: float):

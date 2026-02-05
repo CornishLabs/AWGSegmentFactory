@@ -45,13 +45,11 @@ def format_intent_ir(
     """Format an `IntentIR` as a readable multi-line summary."""
     lines: list[str] = []
     defs = list(intent.definitions.keys())
-    cal_keys = list(intent.calibrations.keys())
     lines.append(
         "IntentIR: "
         f"segments={len(intent.segments)} "
         f"logical_channels={intent.logical_channels} "
         f"definitions={defs}"
-        + (f" calibrations={cal_keys}" if cal_keys else "")
     )
 
     segs, hidden_segs = _limit(intent.segments, max_items=max_segments)
@@ -85,7 +83,6 @@ def format_resolved_ir(
 ) -> str:
     """Format a `ResolvedIR` as a readable multi-line summary."""
     fs = float(ir.sample_rate_hz)
-    cal_keys = list(ir.calibrations.keys())
     lcs = tuple(str(x) for x in (logical_channels or ir.logical_channels))
 
     lines: list[str] = []
@@ -96,7 +93,6 @@ def format_resolved_ir(
         f"duration_s={ir.duration_s:.6g} "
         f"fs_hz={fs:.6g} "
         f"logical_channels={lcs}"
-        + (f" calibrations={cal_keys}" if cal_keys else "")
     )
 
     segs, hidden_segs = _limit(ir.segments, max_items=max_segments)

@@ -1,4 +1,4 @@
-from awgsegmentfactory import AWGProgramBuilder, IntentIR, LinearPositionToFreqCalib
+from awgsegmentfactory import AWGProgramBuilder, IntentIR
 import numpy as np
 
 def ramp_down_chirp_2ch() -> IntentIR:
@@ -114,12 +114,8 @@ def simple_tweens() -> IntentIR:
     return prog
 
 def recreate_mol_exp():
-        
-    cal = LinearPositionToFreqCalib(slope_hz_per_um=250e3)  # example: 250 kHz / µm
-
     ir = (
         AWGProgramBuilder()
-        .with_calibration("pos_to_df", cal)
         .logical_channel("H")
         .logical_channel("V")
         # .grid("twz", H="H", V="V")  # optional metadata only; not needed for control

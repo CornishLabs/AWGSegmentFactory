@@ -40,8 +40,8 @@ class PositionToFreqCalib(ABC):
     """
     Calibration interface for turning a position delta into a frequency delta.
 
-    This is stored on `IntentIR.calibrations` and can be used by higher-level ops
-    (e.g. "move by +dx") before becoming low-level frequency changes.
+    Intended for higher-level ops (e.g. "move by +dx") before becoming low-level
+    frequency changes.
     """
 
     @abstractmethod
@@ -183,4 +183,3 @@ class IntentIR:
     logical_channels: Tuple[str, ...]
     definitions: Dict[str, IntentDefinition]
     segments: Tuple[IntentSegment, ...]
-    calibrations: Dict[str, object]

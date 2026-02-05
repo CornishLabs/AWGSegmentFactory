@@ -25,6 +25,10 @@ from .types import ChannelMap
 from .intent_ir import InterpSpec
 
 
+_ENCODED_QUANTIZED_IR_SCHEMA = "awgsegmentfactory.quantize.QuantizedIR"
+_ENCODED_QUANTIZED_IR_VERSION = 2
+
+
 @dataclass(frozen=True)
 class SegmentQuantizationInfo:
     """Per-segment metadata describing how/why its length was quantized."""
@@ -60,6 +64,83 @@ class QuantizedIR:
     logical_channel_to_hardware_channel: ChannelMap
     quantization: tuple[SegmentQuantizationInfo, ...]
 
+    def encode(self) -> dict[str, object]:
+        """
+        Encode the essential information for sample synthesis into a Python dictionary.
+
+        Notes:
+        - The resulting dictionary contains only basic Python containers plus NumPy arrays/scalars.
+        - Calibrations are not included; attach them at compile time.
+        """
+        return {
+            "__schema__": _ENCODED_QUANTIZED_IR_SCHEMA,
+            "version": _ENCODED_QUANTIZED_IR_VERSION,
+            "resolved_ir": _encode_resolved_ir(self.resolved_ir),
+            "logical_channel_to_hardware_channel": dict(
+                self.logical_channel_to_hardware_channel
+            ),
+            "quantization": tuple(
+                _encode_segment_quantization_info(qi) for qi in self.quantization
+            ),
+        }
+
+    @classmethod
+    def decode(
+        cls, data: dict[str, object], *, allow_unsafe_imports: bool = False
+    ) -> "QuantizedIR":
+        """
+        Decode a dictionary previously produced by `QuantizedIR.encode()`.
+
+        Note:
+        - `allow_unsafe_imports` is ignored (retained for backwards compatibility).
+        """
+        _ = allow_unsafe_imports
+        if not isinstance(data, dict):
+            raise TypeError("QuantizedIR.decode: data must be a dict")
+
+        schema = data.get("__schema__")
+        version = data.get("version")
+        if schema != _ENCODED_QUANTIZED_IR_SCHEMA:
+            raise ValueError(
+                f"QuantizedIR.decode: unsupported schema {schema!r} "
+                f"(expected {_ENCODED_QUANTIZED_IR_SCHEMA!r})"
+            )
+        if version not in (1, _ENCODED_QUANTIZED_IR_VERSION):
+            raise ValueError(
+                f"QuantizedIR.decode: unsupported version {version!r} "
+                f"(expected 1 or {_ENCODED_QUANTIZED_IR_VERSION})"
+            )
+
+        resolved_ir = _decode_resolved_ir(
+            _require_dict(data.get("resolved_ir"), "resolved_ir")
+        )
+
+        mapping_raw = _require_dict(
+            data.get("logical_channel_to_hardware_channel"),
+            "logical_channel_to_hardware_channel",
+        )
+        mapping: ChannelMap = {str(k): int(v) for k, v in mapping_raw.items()}
+
+        quantization_raw = data.get("quantization", ())
+        if isinstance(quantization_raw, tuple):
+            quantization_seq = quantization_raw
+        elif isinstance(quantization_raw, list):
+            quantization_seq = tuple(quantization_raw)
+        else:
+            raise TypeError(
+                "QuantizedIR.decode: quantization must be a list/tuple of dicts"
+            )
+        quantization = tuple(
+            _decode_segment_quantization_info(_require_dict(qi, "quantization[i]"))
+            for qi in quantization_seq
+        )
+
+        return cls(
+            resolved_ir=resolved_ir,
+            logical_channel_to_hardware_channel=mapping,
+            quantization=quantization,
+        )
+
     @property
     def sample_rate_hz(self) -> float:
         """Sample rate in Hz (forwarded from the underlying resolved IR)."""
@@ -78,6 +159,192 @@ class QuantizedIR:
     def to_timeline(self):
         """Convenience: forward to `ResolvedIR.to_timeline()` for debug plotting."""
         return self.resolved_ir.to_timeline()
+
+
+def _require_dict(obj: object, name: str) -> dict[str, object]:
+    if not isinstance(obj, dict):
+        raise TypeError(f"{name} must be a dict, got {type(obj).__name__}")
+    return obj
+
+
+def _encode_interp_spec(interp: InterpSpec) -> dict[str, object]:
+    return {
+        "kind": str(interp.kind),
+        "tau_s": None if interp.tau_s is None else float(interp.tau_s),
+    }
+
+
+def _decode_interp_spec(data: dict[str, object]) -> InterpSpec:
+    kind = data.get("kind")
+    if not isinstance(kind, str):
+        raise TypeError("interp.kind must be a string")
+    tau_s = data.get("tau_s", None)
+    if tau_s is not None:
+        tau_s = float(tau_s)
+    return InterpSpec(kind, tau_s=tau_s)  # validates tau/kind pairing
+
+
+def _encode_logical_channel_state(state: LogicalChannelState) -> dict[str, object]:
+    return {
+        "freqs_hz": np.asarray(state.freqs_hz, dtype=float).reshape(-1),
+        "amps": np.asarray(state.amps, dtype=float).reshape(-1),
+        "phases_rad": np.asarray(state.phases_rad, dtype=float).reshape(-1),
+    }
+
+
+def _decode_logical_channel_state(data: dict[str, object]) -> LogicalChannelState:
+    freqs = np.asarray(data.get("freqs_hz"), dtype=float).reshape(-1)
+    amps = np.asarray(data.get("amps"), dtype=float).reshape(-1)
+    phases = np.asarray(data.get("phases_rad"), dtype=float).reshape(-1)
+    if not (freqs.shape == amps.shape == phases.shape):
+        raise ValueError(
+            "LogicalChannelState arrays must have matching shapes; "
+            f"got freqs={freqs.shape} amps={amps.shape} phases={phases.shape}"
+        )
+    return LogicalChannelState(freqs_hz=freqs, amps=amps, phases_rad=phases)
+
+
+def _encode_resolved_logical_channel_part(
+    pp: ResolvedLogicalChannelPart,
+) -> dict[str, object]:
+    return {
+        "start": _encode_logical_channel_state(pp.start),
+        "end": _encode_logical_channel_state(pp.end),
+        "interp": _encode_interp_spec(pp.interp),
+    }
+
+
+def _decode_resolved_logical_channel_part(
+    data: dict[str, object],
+) -> ResolvedLogicalChannelPart:
+    return ResolvedLogicalChannelPart(
+        start=_decode_logical_channel_state(_require_dict(data.get("start"), "start")),
+        end=_decode_logical_channel_state(_require_dict(data.get("end"), "end")),
+        interp=_decode_interp_spec(_require_dict(data.get("interp"), "interp")),
+    )
+
+
+def _encode_resolved_part(part: ResolvedPart) -> dict[str, object]:
+    return {
+        "n_samples": int(part.n_samples),
+        "logical_channels": {
+            str(lc): _encode_resolved_logical_channel_part(pp)
+            for lc, pp in part.logical_channels.items()
+        },
+    }
+
+
+def _decode_resolved_part(data: dict[str, object]) -> ResolvedPart:
+    n_samples = int(data.get("n_samples"))  # type: ignore[arg-type]
+    logical_channels_raw = _require_dict(data.get("logical_channels"), "logical_channels")
+    logical_channels = {
+        str(lc): _decode_resolved_logical_channel_part(_require_dict(pp, f"part.logical_channels[{lc!r}]"))
+        for lc, pp in logical_channels_raw.items()
+    }
+    return ResolvedPart(n_samples=n_samples, logical_channels=logical_channels)
+
+
+def _encode_resolved_segment(seg: ResolvedSegment) -> dict[str, object]:
+    return {
+        "name": str(seg.name),
+        "mode": str(seg.mode),
+        "loop": int(seg.loop),
+        "phase_mode": str(seg.phase_mode),
+        "snap_len_to_quantum": bool(seg.snap_len_to_quantum),
+        "snap_freqs_to_wrap": bool(seg.snap_freqs_to_wrap),
+        "parts": tuple(_encode_resolved_part(p) for p in seg.parts),
+    }
+
+
+def _decode_resolved_segment(data: dict[str, object]) -> ResolvedSegment:
+    parts_raw = data.get("parts", ())
+    if isinstance(parts_raw, tuple):
+        parts_seq = parts_raw
+    elif isinstance(parts_raw, list):
+        parts_seq = tuple(parts_raw)
+    else:
+        raise TypeError("segment.parts must be a list/tuple")
+    parts = tuple(_decode_resolved_part(_require_dict(p, "segment.parts[i]")) for p in parts_seq)
+
+    return ResolvedSegment(
+        name=str(data.get("name")),
+        mode=str(data.get("mode")),
+        loop=int(data.get("loop")),  # type: ignore[arg-type]
+        parts=parts,
+        phase_mode=str(data.get("phase_mode", "continue")),
+        snap_len_to_quantum=bool(data.get("snap_len_to_quantum", True)),
+        snap_freqs_to_wrap=bool(data.get("snap_freqs_to_wrap", True)),
+    )
+
+
+def _encode_resolved_ir(ir: ResolvedIR) -> dict[str, object]:
+    return {
+        "sample_rate_hz": float(ir.sample_rate_hz),
+        "logical_channels": tuple(str(lc) for lc in ir.logical_channels),
+        "segments": tuple(_encode_resolved_segment(s) for s in ir.segments),
+    }
+
+
+def _decode_resolved_ir(data: dict[str, object]) -> ResolvedIR:
+    segments_raw = data.get("segments", ())
+    if isinstance(segments_raw, tuple):
+        segments_seq = segments_raw
+    elif isinstance(segments_raw, list):
+        segments_seq = tuple(segments_raw)
+    else:
+        raise TypeError("resolved_ir.segments must be a list/tuple")
+
+    segments = tuple(
+        _decode_resolved_segment(_require_dict(s, "resolved_ir.segments[i]"))
+        for s in segments_seq
+    )
+
+    logical_channels_raw = data.get("logical_channels", ())
+    if isinstance(logical_channels_raw, tuple):
+        logical_channels_seq = logical_channels_raw
+    elif isinstance(logical_channels_raw, list):
+        logical_channels_seq = tuple(logical_channels_raw)
+    else:
+        raise TypeError("resolved_ir.logical_channels must be a list/tuple")
+    logical_channels = tuple(str(lc) for lc in logical_channels_seq)
+
+    return ResolvedIR(
+        sample_rate_hz=float(data.get("sample_rate_hz")),  # type: ignore[arg-type]
+        logical_channels=logical_channels,
+        segments=segments,
+    )
+
+
+def _encode_segment_quantization_info(qi: SegmentQuantizationInfo) -> dict[str, object]:
+    return {
+        "name": str(qi.name),
+        "mode": str(qi.mode),
+        "loop": int(qi.loop),
+        "loopable": bool(qi.loopable),
+        "snap_len_to_quantum": bool(qi.snap_len_to_quantum),
+        "snap_freqs_to_wrap": bool(qi.snap_freqs_to_wrap),
+        "original_samples": int(qi.original_samples),
+        "quantized_samples": int(qi.quantized_samples),
+        "step_samples": int(qi.step_samples),
+        "quantum_samples": int(qi.quantum_samples),
+        "sample_rate_hz": float(qi.sample_rate_hz),
+    }
+
+
+def _decode_segment_quantization_info(data: dict[str, object]) -> SegmentQuantizationInfo:
+    return SegmentQuantizationInfo(
+        name=str(data.get("name")),
+        mode=str(data.get("mode")),
+        loop=int(data.get("loop")),  # type: ignore[arg-type]
+        loopable=bool(data.get("loopable")),
+        snap_len_to_quantum=bool(data.get("snap_len_to_quantum")),
+        snap_freqs_to_wrap=bool(data.get("snap_freqs_to_wrap")),
+        original_samples=int(data.get("original_samples")),  # type: ignore[arg-type]
+        quantized_samples=int(data.get("quantized_samples")),  # type: ignore[arg-type]
+        step_samples=int(data.get("step_samples")),  # type: ignore[arg-type]
+        quantum_samples=int(data.get("quantum_samples")),  # type: ignore[arg-type]
+        sample_rate_hz=float(data.get("sample_rate_hz")),  # type: ignore[arg-type]
+    )
 
 
 def format_samples_time(
@@ -461,7 +728,6 @@ def quantize_resolved_ir(
         sample_rate_hz=fs,
         logical_channels=ir.logical_channels,
         segments=tuple(reconciled),
-        calibrations=dict(getattr(ir, "calibrations", {})),
     )
     return QuantizedIR(
         resolved_ir=q_ir,

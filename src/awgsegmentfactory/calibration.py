@@ -1,7 +1,7 @@
 """Calibration helpers for higher-level, position-like operations.
 
-Calibrations are currently stored on `IntentIR.calibrations` for future integration
-into builder ops. The core compilation pipeline operates on frequency deltas directly.
+The core compilation pipeline operates on frequency deltas directly. Optical-power
+calibrations are applied at compile time via `compile_sequence_program(..., optical_power_calib=...)`.
 """
 
 from __future__ import annotations

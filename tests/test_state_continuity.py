@@ -83,7 +83,6 @@ class TestStateContinuity(unittest.TestCase):
                     ),
                 ),
             ),
-            calibrations={},
         )
 
         tl = resolve_intent_ir(intent, sample_rate_hz=fs).to_timeline()
