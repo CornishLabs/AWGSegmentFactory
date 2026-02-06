@@ -5,12 +5,14 @@ The builder is the user-facing API. It records operations into a continuous-time
 """
 
 from __future__ import annotations
+from dataclasses import dataclass, field
 import math
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from .intent_ir import (
     IntentIR,
     IntentSegment,
+    Op,
     InterpKind,
     InterpSpec,
     SegmentMode,
@@ -40,6 +42,19 @@ def _phases_auto(n: int) -> Tuple[float, ...]:
 
 
 SegmentModeArg = SegmentMode | Literal["once"]
+
+
+@dataclass
+class _SegmentDraft:
+    """Internal mutable segment representation used while recording builder ops."""
+
+    name: str
+    mode: SegmentMode
+    loop: int
+    phase_mode: SegmentPhaseMode
+    snap_len_to_quantum: bool
+    snap_freqs_to_wrap: bool
+    ops: list[Op] = field(default_factory=list)
 
 
 class LogicalChannelView:
@@ -276,7 +291,7 @@ class AWGProgramBuilder:
         """Create an empty builder with no logical channels, definitions, or segments."""
         self._logical_channels: List[str] = []
         self._definitions: Dict[str, IntentDefinition] = {}
-        self._segments: List[IntentSegment] = []
+        self._segments: List[_SegmentDraft] = []
         self._current_seg: Optional[int] = None
 
     def logical_channel(self, name: str) -> "AWGProgramBuilder":
@@ -369,11 +384,10 @@ class AWGProgramBuilder:
             raise ValueError("phase_mode must be one of 'manual', 'continue', 'optimise'")
 
         self._segments.append(
-            IntentSegment(
+            _SegmentDraft(
                 name=name,
                 mode=resolved_mode,
                 loop=int(loop),
-                ops=tuple(),
                 phase_mode=phase_mode,
                 snap_len_to_quantum=bool(snap_len_to_quantum),
                 snap_freqs_to_wrap=bool(snap_freqs_to_wrap),
@@ -447,24 +461,28 @@ class AWGProgramBuilder:
         if self._current_seg is None:
             raise RuntimeError("Call .segment(...) before adding ops")
         seg = self._segments[self._current_seg]
-        self._segments[self._current_seg] = IntentSegment(
-            name=seg.name,
-            mode=seg.mode,
-            loop=seg.loop,
-            ops=seg.ops + (op,),
-            phase_mode=seg.phase_mode,
-            snap_len_to_quantum=seg.snap_len_to_quantum,
-            snap_freqs_to_wrap=seg.snap_freqs_to_wrap,
-        )
+        seg.ops.append(op)
 
     def build_intent_ir(self) -> IntentIR:
         """Finalize and return the recorded `IntentIR` without resolving to samples."""
         if not self._segments:
             raise RuntimeError("No segments defined")
+        segments = tuple(
+            IntentSegment(
+                name=seg.name,
+                mode=seg.mode,
+                loop=seg.loop,
+                ops=tuple(seg.ops),
+                phase_mode=seg.phase_mode,
+                snap_len_to_quantum=seg.snap_len_to_quantum,
+                snap_freqs_to_wrap=seg.snap_freqs_to_wrap,
+            )
+            for seg in self._segments
+        )
         return IntentIR(
             logical_channels=tuple(self._logical_channels),
             definitions=dict(self._definitions),
-            segments=tuple(self._segments),
+            segments=segments,
         )
 
     def build_timeline(self, *, sample_rate_hz: float):

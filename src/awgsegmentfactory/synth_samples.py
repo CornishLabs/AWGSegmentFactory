@@ -368,8 +368,27 @@ def _synth_logical_channel_segment(
     phase_dtype = xp.float32 if xp is not np else float
     phase = xp.asarray(phase0_np, dtype=phase_dtype).copy()
 
-    ys: list[Any] = []
-    for part in seg.parts:
+    total = int(seg.n_samples)
+    cursor = 0
+
+    # Allocate output once to avoid list + concatenate (extra copy and peak memory).
+    part0 = seg.parts[0]
+    pp0 = part0.logical_channels[logical_channel]
+    y0, phase = _synth_part(
+        pp0,
+        n_samples=part0.n_samples,
+        sample_rate_hz=sample_rate_hz,
+        phase0_rad=phase,
+        logical_channel=logical_channel,
+        amp_calib=amp_calib,
+        xp=xp,
+    )
+    out = xp.empty((total,), dtype=y0.dtype)
+    n0 = int(part0.n_samples)
+    out[cursor : cursor + n0] = y0
+    cursor += n0
+
+    for part in seg.parts[1:]:
         pp = part.logical_channels[logical_channel]
         y, phase = _synth_part(
             pp,
@@ -380,8 +399,11 @@ def _synth_logical_channel_segment(
             amp_calib=amp_calib,
             xp=xp,
         )
-        ys.append(y)
-    return xp.concatenate(ys, axis=0), phase
+        n = int(part.n_samples)
+        out[cursor : cursor + n] = y
+        cursor += n
+
+    return out, phase
 
 
 def _cupy_or_raise():
