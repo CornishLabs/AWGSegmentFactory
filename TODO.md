@@ -46,6 +46,7 @@ It replaces `plan.md`, which had a mixture of historical design notes and comple
 ## Code health / maintainability
 
 - [ ] Move `LogicalChannelState` out of `src/awgsegmentfactory/resolved_timeline.py` so the “timeline” module can stay debug-only
+- [ ] Builder interpolation UX: accept only ADT-style interpolation objects (e.g. `Exp(tau_s=...)`) and convert to `InterpSpec` internally; consider moving ADT deeper into IR stages later if it pays off
 - [ ] Refactor `resolve_intent_ir` op handling into a dispatch table (similar to `_INTERP_BY_KIND` in interpolation)
 - [ ] Avoid debug modules importing private compiler helpers (e.g. promote `_interp_logical_channel_part` to a shared internal module)
 - [ ] Improve typing for NumPy/CuPy compatibility (use `Any`/Protocol/ArrayLike where appropriate)
