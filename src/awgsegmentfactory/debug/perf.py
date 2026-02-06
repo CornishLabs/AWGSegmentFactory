@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from time import perf_counter
 from typing import Callable, Optional, Sequence
 
 from ..builder import AWGProgramBuilder
 from ..calibration import OpticalPowerToRFAmpCalib
+from ..intent_ir import IntentIR
 from ..resolve import resolve_intent_ir
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
 from ..quantize import quantize_resolved_ir
@@ -19,6 +22,7 @@ class PipelineTimings:
     """Wall-clock timings for each stage of the compilation pipeline."""
 
     build_intent_s: float
+    intent_codec_s: float
     resolve_s: float
     quantize_s: float
     compile_s: float
@@ -43,12 +47,23 @@ def compile_builder_pipeline_timed(
     t0 = perf_counter()
     intent = builder.build_intent_ir()
     t1 = perf_counter()
-    resolved = resolve_intent_ir(intent, sample_rate_hz=sample_rate_hz)
+
+    # Simulate shipping IntentIR "over the wire": encode -> hash -> decode.
+    encoded_intent = intent.encode()
+    hashlib.sha256(
+        json.dumps(
+            encoded_intent, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    ).hexdigest()
+    intent = IntentIR.decode(encoded_intent)
     t2 = perf_counter()
+
+    resolved = resolve_intent_ir(intent, sample_rate_hz=sample_rate_hz)
+    t3 = perf_counter()
     quantized = quantize_resolved_ir(
         resolved, logical_channel_to_hardware_channel=logical_channel_to_hardware_channel
     )
-    t3 = perf_counter()
+    t4 = perf_counter()
     compiled = compile_sequence_program(
         quantized,
         gain=gain,
@@ -67,14 +82,15 @@ def compile_builder_pipeline_timed(
             # If CuPy isn't available here, compile_sequence_program(gpu=True) should
             # already have failed; keep this as a best-effort sync.
             pass
-    t4 = perf_counter()
+    t5 = perf_counter()
 
     return compiled, PipelineTimings(
         build_intent_s=t1 - t0,
-        resolve_s=t2 - t1,
-        quantize_s=t3 - t2,
-        compile_s=t4 - t3,
-        total_s=t4 - t0,
+        intent_codec_s=t2 - t1,
+        resolve_s=t3 - t2,
+        quantize_s=t4 - t3,
+        compile_s=t5 - t4,
+        total_s=t5 - t0,
     )
 
 
@@ -145,6 +161,7 @@ def format_benchmark_table(runs: Sequence[PipelineTimings]) -> str:
 
     rows = [
         ("build_intent", col(lambda r: r.build_intent_s)),
+        ("intent_codec", col(lambda r: r.intent_codec_s)),
         ("resolve", col(lambda r: r.resolve_s)),
         ("quantize", col(lambda r: r.quantize_s)),
         ("compile", col(lambda r: r.compile_s)),
