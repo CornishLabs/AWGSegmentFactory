@@ -21,10 +21,12 @@ from awgsegmentfactory import (
     AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
-    compile_sequence_program,
-    format_samples_time,
+    quantize_synthesized_program,
     quantize_resolved_ir,
+    synthesize_sequence_program,
 )
+
+from common import print_quantization_report, setup_spcm_sequence_from_compiled
 
 
 def _build_dc_pulse_program(
@@ -54,45 +56,6 @@ def _build_dc_pulse_program(
     b.hold(time=pulse_s)
 
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
-
-
-def _print_quantization_report(compiled) -> None:
-    fs = float(compiled.sample_rate_hz)
-    if not compiled.quantization:
-        return
-    q = compiled.quantization[0].quantum_samples
-    step = compiled.quantization[0].step_samples
-    print(f"segment quantum: {format_samples_time(q, fs)} | step: {step} samples")
-    for qi in compiled.quantization:
-        o = format_samples_time(qi.original_samples, fs)
-        n = format_samples_time(qi.quantized_samples, fs)
-        print(
-            f"- {qi.name}: {o} -> {n} | mode={qi.mode} loop={qi.loop} loopable={qi.loopable}"
-        )
-
-
-def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
-    segments_hw = []
-    for seg in compiled.segments:
-        s = sequence.add_segment(seg.n_samples)
-        s[:, :] = seg.data_i16
-        segments_hw.append(s)
-
-    steps_hw = []
-    for step in compiled.steps:
-        steps_hw.append(
-            sequence.add_step(segments_hw[step.segment_index], loops=step.loops)
-        )
-
-    sequence.entry_step(steps_hw[0])
-
-    for step in compiled.steps:
-        steps_hw[step.step_index].set_transition(
-            steps_hw[step.next_step], on_trig=step.on_trig
-        )
-
-    sequence.write_setup()
-
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -131,19 +94,22 @@ def main() -> None:
         segment_quantum_s=segment_quantum_s,
         step_samples=int(args.step_samples),
     )
+    synthesized = synthesize_sequence_program(
+        q,
+        physical_setup=physical_setup,
+    )
 
     # If you don't have a card connected, use a safe "typical" int16 full-scale.
     full_scale_default = 32767
-    compiled = compile_sequence_program(
-        q,
-        physical_setup=physical_setup,
+    compiled = quantize_synthesized_program(
+        synthesized,
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
     )
 
     print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
-    _print_quantization_report(compiled)
+    print_quantization_report(compiled)
     print(
         "Notes:\n"
         "- EXT0 trigger transitions from 'wait_low' -> 'pulse_high'.\n"
@@ -181,18 +147,17 @@ def main() -> None:
             clock.sample_rate(compiled.sample_rate_hz * units.Hz)
             clock.clock_output(False)
 
-            # Compile again with the card's exact DAC scaling.
+            # Re-quantize with the card's exact DAC scaling.
             full_scale = int(card.max_sample_value()) - 1
-            compiled = compile_sequence_program(
-                q,
-                physical_setup=physical_setup,
+            compiled = quantize_synthesized_program(
+                synthesized,
                 gain=1.0,
                 clip=0.9,
                 full_scale=full_scale,
             )
 
             sequence = spcm.Sequence(card)
-            _setup_spcm_sequence_from_compiled(sequence, compiled)
+            setup_spcm_sequence_from_compiled(sequence, compiled)
             print("sequence written; starting card (Ctrl+C to stop)")
 
             card.timeout(0)

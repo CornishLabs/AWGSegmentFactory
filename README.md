@@ -32,6 +32,11 @@ uv run --cache-dir .uv-cache examples/recreate_current.py
 uv sync --dev
 ```
 
+To run Spectrum hardware-control examples, install the optional extra:
+```
+uv sync --dev --extra control-hardware
+```
+
 ## Quick start
 
 ### 1) Build a program (builder → IR)
@@ -126,6 +131,7 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 ## Hardware upload (Spectrum) (optional)
 
 This repo includes working Spectrum examples under `examples/spcm/` (sequence mode, triggers, etc).
+Install the optional dependency group first: `uv sync --extra control-hardware`
 The library function `upload_sequence_program(...)` is a placeholder for a future stable API; today it raises
 `NotImplementedError` for CPU upload and points at `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
 

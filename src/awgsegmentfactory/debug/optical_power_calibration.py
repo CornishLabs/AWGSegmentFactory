@@ -6,7 +6,11 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from ..optical_power_calibration_fit import OpticalPowerCalCurve, Sin2PolyFitResult
+from ..optical_power_calibration_fit import (
+    OpticalPowerCalCurve,
+    Sin2PolyFitResult,
+    regular_grid_from_curves,
+)
 
 
 def _freq_scale(freq_unit: str) -> float:
@@ -17,29 +21,6 @@ def _freq_scale(freq_unit: str) -> float:
     if freq_unit == "MHz":
         return 1e6
     raise ValueError("freq_unit must be one of {'Hz','kHz','MHz'}")
-
-
-def _try_grid(
-    curves: Sequence[OpticalPowerCalCurve],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Return (freqs_hz, amps_mV, power_grid) if curves form a clean grid, else None."""
-    if not curves:
-        return None
-    amps0 = np.asarray(curves[0].rf_amps_mV, dtype=float).reshape(-1)
-    if amps0.size == 0:
-        return None
-    n = int(amps0.size)
-    freqs = np.empty((len(curves),), dtype=float)
-    grid = np.empty((len(curves), n), dtype=float)
-    for i, c in enumerate(curves):
-        freqs[i] = float(c.freq_hz)
-        a = np.asarray(c.rf_amps_mV, dtype=float).reshape(-1)
-        if a.size != n:
-            return None
-        if not np.array_equal(a, amps0):
-            return None
-        grid[i, :] = np.asarray(c.optical_powers, dtype=float).reshape(-1)
-    return freqs, amps0, grid
 
 
 def plot_sin2_fit_surfaces(
@@ -66,7 +47,7 @@ def plot_sin2_fit_surfaces(
     xlabel = f"RF frequency ({freq_unit})"
     ylabel = "RF amplitude (mV)"
 
-    grid = _try_grid(curves)
+    grid = regular_grid_from_curves(curves)
     fig, axs = plt.subplots(1, 3, figsize=(16, 4.6), sharex=False, sharey=False)
     ax0, ax1, ax2 = axs
 

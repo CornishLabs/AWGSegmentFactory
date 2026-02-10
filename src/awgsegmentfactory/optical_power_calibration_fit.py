@@ -285,6 +285,43 @@ def curves_from_awgde_dict(
         clamp_power_nonnegative=True,
     )
 
+
+def regular_grid_from_curves(
+    curves: Sequence[OpticalPowerCalCurve],
+    *,
+    rtol: float = 0.0,
+    atol: float = 1e-9,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """
+    Return `(freqs_hz, amps_mV, power_grid)` if curves form a regular 2D grid.
+
+    The returned arrays are ordered by ascending frequency and satisfy:
+    - `freqs_hz.shape == (n_freq,)`
+    - `amps_mV.shape == (n_amp,)`
+    - `power_grid.shape == (n_freq, n_amp)`
+    """
+    if not curves:
+        return None
+
+    curves_sorted = sorted(curves, key=lambda c: float(c.freq_hz))
+    amps_mV = np.asarray(curves_sorted[0].rf_amps_mV, dtype=float).reshape(-1)
+    if amps_mV.size == 0:
+        return None
+
+    n_amp = int(amps_mV.size)
+    freqs_hz = np.empty((len(curves_sorted),), dtype=float)
+    power_grid = np.empty((len(curves_sorted), n_amp), dtype=float)
+    for i, c in enumerate(curves_sorted):
+        a = np.asarray(c.rf_amps_mV, dtype=float).reshape(-1)
+        if a.size != n_amp:
+            return None
+        if not np.allclose(a, amps_mV, rtol=float(rtol), atol=float(atol)):
+            return None
+        freqs_hz[i] = float(c.freq_hz)
+        power_grid[i, :] = np.asarray(c.optical_powers, dtype=float).reshape(-1)
+    return freqs_hz, amps_mV, power_grid
+
+
 @dataclass(frozen=True)
 class Sin2PolyFitResult:
     """Fit result for `optical_power ≈ g(freq) * sin^2((π/2) * amp / v0(freq))`."""

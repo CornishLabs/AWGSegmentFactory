@@ -50,6 +50,7 @@ from awgsegmentfactory.optical_power_calibration_fit import (
     curves_from_de_rf_calibration_dict,
     curves_from_point_cloud,
     fit_sin2_poly_model_by_logical_channel,
+    regular_grid_from_curves,
     suggest_amp_scale_from_curves,
 )
 
@@ -376,26 +377,11 @@ def _plot_power_map_derived_from_de_rf(
 def _regular_grid_from_curves(
     curves: Sequence[OpticalPowerCalCurve],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    if not curves:
+    grid = regular_grid_from_curves(curves, rtol=0.0, atol=1e-9)
+    if grid is None:
         return None
-
-    curves_sorted = sorted(curves, key=lambda c: float(c.freq_hz))
-    amps_mV = np.asarray(curves_sorted[0].rf_amps_mV, dtype=float).reshape(-1)
-    if amps_mV.size == 0:
-        return None
-
-    n_amp = int(amps_mV.size)
-    freqs_mhz = np.empty((len(curves_sorted),), dtype=float)
-    de = np.empty((len(curves_sorted), n_amp), dtype=float)
-    for i, c in enumerate(curves_sorted):
-        a = np.asarray(c.rf_amps_mV, dtype=float).reshape(-1)
-        if a.size != n_amp:
-            return None
-        if not np.allclose(a, amps_mV, rtol=0.0, atol=1e-9):
-            return None
-        freqs_mhz[i] = float(c.freq_hz) * 1e-6
-        de[i, :] = np.asarray(c.optical_powers, dtype=float).reshape(-1)
-    return freqs_mhz, amps_mV, de
+    freqs_hz, amps_mV, de = grid
+    return np.asarray(freqs_hz, dtype=float) * 1e-6, amps_mV, de
 
 
 def _slice_specs_for_axis(n_points: int) -> tuple[tuple[float, str], ...]:
