@@ -485,6 +485,7 @@ def compile_sequence_program(
     - If `optical_power_calib` is provided, `amps` in the IR are interpreted as desired
       optical power (or a proxy), and are converted to RF synthesis amplitudes during
       sample synthesis.
+      - Typical object: `AWGCalibration` from `awgsegmentfactory.calibration`.
     - If `optical_power_calib is None`, `amps` are treated as direct RF synthesis
       amplitudes.
 

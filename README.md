@@ -129,13 +129,13 @@ to the RF synthesis amplitudes actually used for sample generation.
 Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
 - `AODSin2Calib`: single-channel sin² model,
   `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (invertible on the first lobe).
-- `MultiChannelAODSin2Calib`: maps logical channel names to physical channel indices and dispatches to per-channel `AODSin2Calib` objects.
+- `AWGCalibration`: maps logical channel names to physical channel indices and dispatches to per-channel `AODSin2Calib` objects.
   - Small-signal limit: `sin(z)≈z`, so `optical_power ≈ g * ((π/2) * rf_amp / v0)^2` (square-law).
 
 Typical workflow:
 1) Record calibration data from your setup (either per-frequency `DE vs RF amplitude` curves or iso-power `(freq, amp)` points).
 2) Fit one `AODSin2Calib` per physical channel.
-3) Optionally wrap them in `MultiChannelAODSin2Calib` and pass via
+3) Wrap them in `AWGCalibration` and pass via
    `compile_sequence_program(..., optical_power_calib=calib)`.
 
 Examples:
@@ -158,7 +158,7 @@ flowchart LR
     R -- quantize_resolved_ir --> Q
     Q -- compile_sequence_program --> C
 
-    CAL[Calibrations: AODSin2Calib / MultiChannelAODSin2Calib] --> C
+    CAL[Calibrations: AODSin2Calib / AWGCalibration] --> C
 
     R -- to_timeline --> TL[ResolvedTimeline]
     Q -- debug --> DBG[sequence_samples_debug]

@@ -6,9 +6,11 @@ calibrations are applied at compile time via `compile_sequence_program(..., opti
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -89,7 +91,7 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
         optical_power ≈ g(freq) * sin^2( (π/2) * rf_amp / v0(freq) )
 
     Single-channel form:
-    Using x = (freq_hz - mid_hz) / halfspan_hz and polynomials in x:
+    Using x = normalized(freq_hz, freq_min_hz, freq_max_hz) and polynomials in x:
         g(freq)  = polyval(g_poly, x)
         v0(freq) = sqrt(polyval(v0_a_poly, x)^2 + min_v0_sq)
 
@@ -104,8 +106,9 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
 
     g_poly_high_to_low: Tuple[float, ...]
     v0_a_poly_high_to_low: Tuple[float, ...]
-    freq_mid_hz: float
-    freq_halfspan_hz: float
+    freq_min_hz: float
+    freq_max_hz: float
+    traceability_string: str = ""
     amp_scale: float = 1.0
     min_g: float = 1e-12
     min_v0_sq: float = 1e-12
@@ -116,10 +119,12 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             raise ValueError("g_poly_high_to_low must not be empty")
         if len(tuple(self.v0_a_poly_high_to_low)) == 0:
             raise ValueError("v0_a_poly_high_to_low must not be empty")
-        if not np.isfinite(float(self.freq_mid_hz)):
-            raise ValueError("freq_mid_hz must be finite")
-        if not np.isfinite(float(self.freq_halfspan_hz)) or float(self.freq_halfspan_hz) <= 0:
-            raise ValueError("freq_halfspan_hz must be finite and > 0")
+        if not np.isfinite(float(self.freq_min_hz)):
+            raise ValueError("freq_min_hz must be finite")
+        if not np.isfinite(float(self.freq_max_hz)):
+            raise ValueError("freq_max_hz must be finite")
+        if float(self.freq_max_hz) <= float(self.freq_min_hz):
+            raise ValueError("freq_max_hz must be > freq_min_hz")
         if not np.isfinite(float(self.amp_scale)) or float(self.amp_scale) <= 0:
             raise ValueError("amp_scale must be finite and > 0")
         if not np.isfinite(float(self.min_g)) or float(self.min_g) <= 0:
@@ -128,6 +133,28 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             raise ValueError("min_v0_sq must be finite and > 0")
         if not np.isfinite(float(self.y_eps)) or not (0.0 < float(self.y_eps) < 1.0):
             raise ValueError("y_eps must be finite and in (0, 1)")
+        object.__setattr__(self, "traceability_string", str(self.traceability_string))
+
+    def _freq_mid_hz(self) -> float:
+        return 0.5 * (float(self.freq_min_hz) + float(self.freq_max_hz))
+
+    def _freq_halfspan_hz(self) -> float:
+        return 0.5 * (float(self.freq_max_hz) - float(self.freq_min_hz))
+
+    def _x_from_freq(self, freqs_hz: Any, *, xp: Any) -> Any:
+        f = xp.asarray(freqs_hz, dtype=float)
+        x = (f - self._freq_mid_hz()) / self._freq_halfspan_hz()
+        return xp.clip(x, -1.0, 1.0)
+
+    def g_of_freq(self, freqs_hz: Any, *, xp: Any = np) -> Any:
+        x = self._x_from_freq(freqs_hz, xp=xp)
+        g = _polyval_horner(tuple(self.g_poly_high_to_low), x, xp=xp)
+        return xp.maximum(g, float(self.min_g))
+
+    def v0_of_freq_mV(self, freqs_hz: Any, *, xp: Any = np) -> Any:
+        x = self._x_from_freq(freqs_hz, xp=xp)
+        a0 = _polyval_horner(tuple(self.v0_a_poly_high_to_low), x, xp=xp)
+        return xp.sqrt((a0 * a0) + float(self.min_v0_sq))
 
     def rf_amps(
         self,
@@ -137,60 +164,110 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
         logical_channel: str,
         xp: Any = np,
     ) -> Any:
-        f = xp.asarray(freqs_hz, dtype=float)
         p_opt = xp.asarray(optical_powers, dtype=float)
-
-        x = (f - float(self.freq_mid_hz)) / float(self.freq_halfspan_hz)
-        x = xp.clip(x, -1.0, 1.0)
-
-        # Single-channel model; `logical_channel` is ignored here and handled by wrappers.
-        g = _polyval_horner(tuple(self.g_poly_high_to_low), x, xp=xp)
-        g = xp.maximum(g, float(self.min_g))
-
-        a0 = _polyval_horner(tuple(self.v0_a_poly_high_to_low), x, xp=xp)
-        v0 = xp.sqrt((a0 * a0) + float(self.min_v0_sq))
+        # Single-channel model; `logical_channel` is accepted for interface consistency.
+        g = self.g_of_freq(freqs_hz, xp=xp)
+        v0 = self.v0_of_freq_mV(freqs_hz, xp=xp)
 
         y = xp.maximum(p_opt, 0.0) / g
         y = xp.clip(y, 0.0, 1.0 - float(self.y_eps))
         rf_amp = v0 * (2.0 / float(np.pi)) * xp.arcsin(xp.sqrt(y))
         return float(self.amp_scale) * rf_amp
 
+    @property
+    def best_freq_hz(self) -> int:
+        ff = np.linspace(
+            float(self.freq_min_hz),
+            float(self.freq_max_hz),
+            num=4096,
+            dtype=float,
+        )
+        gg = np.asarray(self.g_of_freq(ff, xp=np), dtype=float)
+        finite = np.isfinite(gg)
+        if not np.any(finite):
+            return int(round(self._freq_mid_hz()))
+        gg_safe = np.where(finite, gg, -np.inf)
+        i = int(np.argmax(gg_safe))
+        return int(round(float(ff[i])))
+
+    def serialise(self) -> Dict[str, Any]:
+        return {
+            "g_poly_high_to_low": [float(x) for x in tuple(self.g_poly_high_to_low)],
+            "v0_a_poly_high_to_low": [float(x) for x in tuple(self.v0_a_poly_high_to_low)],
+            "freq_min_hz": float(self.freq_min_hz),
+            "freq_max_hz": float(self.freq_max_hz),
+            "traceability_string": str(self.traceability_string),
+            "best_freq_hz": int(self.best_freq_hz),
+            "amp_scale": float(self.amp_scale),
+            "min_g": float(self.min_g),
+            "min_v0_sq": float(self.min_v0_sq),
+            "y_eps": float(self.y_eps),
+        }
+
+    def serialize(self) -> Dict[str, Any]:
+        return self.serialise()
+
+    @classmethod
+    def deserialise(cls, data: Mapping[str, Any]) -> "AODSin2Calib":
+        return cls(
+            g_poly_high_to_low=tuple(float(x) for x in list(data["g_poly_high_to_low"])),
+            v0_a_poly_high_to_low=tuple(float(x) for x in list(data["v0_a_poly_high_to_low"])),
+            freq_min_hz=float(data["freq_min_hz"]),
+            freq_max_hz=float(data["freq_max_hz"]),
+            traceability_string=str(data.get("traceability_string", "")),
+            amp_scale=float(data["amp_scale"]),
+            min_g=float(data.get("min_g", 1e-12)),
+            min_v0_sq=float(data.get("min_v0_sq", 1e-12)),
+            y_eps=float(data.get("y_eps", 1e-6)),
+        )
+
+    @classmethod
+    def deserialize(cls, data: Mapping[str, Any]) -> "AODSin2Calib":
+        return cls.deserialise(data)
+
 
 @dataclass(frozen=True)
-class MultiChannelAODSin2Calib(OpticalPowerToRFAmpCalib):
+class AWGCalibration(OpticalPowerToRFAmpCalib):
     """
-    Multi-channel calibration wrapper using explicit logical->channel-index mapping.
+    AWG-level optical-power calibration container.
 
-    - `channel_calibs[i]` corresponds to physical channel index `i`.
-    - `logical_to_channel_index` maps logical names (e.g. "H", "V") to those indices.
+    - `N_ch`: number of physical AWG channels.
+    - `logical_to_hardware_map`: logical name -> hardware channel index.
+    - `channel_calibrations[i]`: calibration for hardware channel index `i`.
     """
 
-    channel_calibs: Tuple[AODSin2Calib, ...]
-    logical_to_channel_index: Dict[str, int]
+    N_ch: int
+    logical_to_hardware_map: Dict[str, int]
+    channel_calibrations: Tuple[AODSin2Calib, ...]
 
     def __post_init__(self) -> None:
-        calibs = tuple(self.channel_calibs)
-        mapping = {str(k): int(v) for k, v in dict(self.logical_to_channel_index).items()}
-        if len(calibs) == 0:
-            raise ValueError("channel_calibs must contain at least one channel")
-        if not mapping:
-            raise ValueError("logical_to_channel_index must not be empty")
-        n = len(calibs)
-        for logical, idx in mapping.items():
-            if idx < 0 or idx >= n:
-                raise ValueError(
-                    f"logical_to_channel_index[{logical!r}]={idx} out of range for {n} channel(s)"
-                )
-        object.__setattr__(self, "channel_calibs", calibs)
-        object.__setattr__(self, "logical_to_channel_index", mapping)
+        n_ch = int(self.N_ch)
+        if n_ch <= 0:
+            raise ValueError("N_ch must be > 0")
 
-    def channel_index_for_logical_channel(self, logical_channel: str) -> int:
-        key = str(logical_channel)
-        if key not in self.logical_to_channel_index:
-            raise KeyError(
-                f"Unknown logical_channel {key!r}; available: {sorted(self.logical_to_channel_index.keys())}"
+        mapping = {str(k): int(v) for k, v in dict(self.logical_to_hardware_map).items()}
+        if not mapping:
+            raise ValueError("logical_to_hardware_map must not be empty")
+
+        calibs = tuple(self.channel_calibrations)
+        if len(calibs) != n_ch:
+            raise ValueError(
+                f"channel_calibrations length ({len(calibs)}) must equal N_ch ({n_ch})"
             )
-        return int(self.logical_to_channel_index[key])
+
+        used_hw: set[int] = set()
+        for logical, hw_idx in mapping.items():
+            if hw_idx < 0 or hw_idx >= n_ch:
+                raise ValueError(
+                    f"logical_to_hardware_map[{logical!r}]={hw_idx} out of range for N_ch={n_ch}"
+                )
+            if hw_idx in used_hw:
+                raise ValueError("logical_to_hardware_map must be one-to-one")
+            used_hw.add(hw_idx)
+
+        object.__setattr__(self, "N_ch", n_ch)
+        object.__setattr__(self, "logical_to_hardware_map", mapping)
+        object.__setattr__(self, "channel_calibrations", calibs)
 
     def rf_amps(
         self,
@@ -200,10 +277,57 @@ class MultiChannelAODSin2Calib(OpticalPowerToRFAmpCalib):
         logical_channel: str,
         xp: Any = np,
     ) -> Any:
-        idx = self.channel_index_for_logical_channel(str(logical_channel))
-        return self.channel_calibs[int(idx)].rf_amps(
+        key = str(logical_channel)
+        if key not in self.logical_to_hardware_map:
+            raise KeyError(
+                f"Unknown logical_channel {key!r}; available: {sorted(self.logical_to_hardware_map.keys())}"
+            )
+        hw_idx = int(self.logical_to_hardware_map[key])
+        return self.channel_calibrations[hw_idx].rf_amps(
             freqs_hz,
             optical_powers,
-            logical_channel=str(logical_channel),
+            logical_channel=key,
             xp=xp,
         )
+
+    def serialise(self) -> Dict[str, Any]:
+        return {
+            "N_ch": int(self.N_ch),
+            "logical_to_hardware_map": {
+                str(k): int(v) for k, v in self.logical_to_hardware_map.items()
+            },
+            "channel_calibrations": [c.serialise() for c in self.channel_calibrations],
+        }
+
+    def serialize(self) -> Dict[str, Any]:
+        return self.serialise()
+
+    @classmethod
+    def deserialise(cls, data: Mapping[str, Any]) -> "AWGCalibration":
+        raw = data.get("channel_calibrations")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("AWGCalibration requires a non-empty 'channel_calibrations' list")
+        return cls(
+            N_ch=int(data["N_ch"]),
+            logical_to_hardware_map={
+                str(k): int(v)
+                for k, v in dict(data.get("logical_to_hardware_map", {})).items()
+            },
+            channel_calibrations=tuple(AODSin2Calib.deserialise(x) for x in raw),
+        )
+
+    @classmethod
+    def deserialize(cls, data: Mapping[str, Any]) -> "AWGCalibration":
+        return cls.deserialise(data)
+
+    def to_file(self, path: str | Path) -> None:
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(self.serialise(), indent=2, sort_keys=True), encoding="utf-8")
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "AWGCalibration":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, Mapping):
+            raise ValueError("AWG calibration file must contain a JSON object")
+        return cls.deserialise(payload)

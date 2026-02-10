@@ -6,7 +6,7 @@ Model: sin2
 
 from __future__ import annotations
 
-from awgsegmentfactory.calibration import AODSin2Calib, MultiChannelAODSin2Calib
+from awgsegmentfactory.calibration import AODSin2Calib, AWGCalibration
 
 # source: H='examples/calibrations/814_H_calFile_17.02.2022_0=0.txt'
 CALIB_814_CALFILE_17_02_2022_0_0_H = AODSin2Calib(
@@ -28,8 +28,9 @@ CALIB_814_CALFILE_17_02_2022_0_0_H = AODSin2Calib(
         -11.97940312739627,
         199.7834400057718,
     ),
-    freq_mid_hz=100000000,
-    freq_halfspan_hz=20000000,
+    freq_min_hz=80000000,
+    freq_max_hz=120000000,
+    traceability_string="examples/calibrations/814_H_calFile_17.02.2022_0=0.txt",
     amp_scale=0.005882352941176471,
     min_g=1e-12,
     min_v0_sq=1e-09,
@@ -56,17 +57,19 @@ CALIB_814_CALFILE_17_02_2022_0_0_V = AODSin2Calib(
         -12.31066136792399,
         151.8124648021865,
     ),
-    freq_mid_hz=100000000,
-    freq_halfspan_hz=20000000,
+    freq_min_hz=80000000,
+    freq_max_hz=120000000,
+    traceability_string="examples/calibrations/814_V_calFile_17.02.2022_0=0.txt",
     amp_scale=0.005882352941176471,
     min_g=1e-12,
     min_v0_sq=1e-09,
     y_eps=1e-06,
 )
 
-CALIB_814_CALFILE_17_02_2022_0_0 = MultiChannelAODSin2Calib(
-    channel_calibs=(CALIB_814_CALFILE_17_02_2022_0_0_H, CALIB_814_CALFILE_17_02_2022_0_0_V),
-    logical_to_channel_index={"H": 0, "V": 1},
+CALIB_814_CALFILE_17_02_2022_0_0 = AWGCalibration(
+    N_ch=2,
+    logical_to_hardware_map={"H": 0, "V": 1},
+    channel_calibrations=(CALIB_814_CALFILE_17_02_2022_0_0_H, CALIB_814_CALFILE_17_02_2022_0_0_V),
 )
 
 # source: *='examples/calibrations/AWG1_calibration_22_02_2023_90MHz_255MHz.awgde'
@@ -89,8 +92,9 @@ AWG1_CALIBRATION_22_02_2023_90MHZ_255MHZ = AODSin2Calib(
         -10.72565578610046,
         274.8991594708095,
     ),
-    freq_mid_hz=170500000,
-    freq_halfspan_hz=80500000,
+    freq_min_hz=90000000,
+    freq_max_hz=251000000,
+    traceability_string="examples/calibrations/AWG1_calibration_22_02_2023_90MHz_255MHz.awgde",
     amp_scale=0.003999999999999999,
     min_g=1e-12,
     min_v0_sq=1e-09,
@@ -117,17 +121,17 @@ AWG3_CALIBRATION_04_10_2024_98MHZ_118MHZ = AODSin2Calib(
         63.73744831391763,
         375.7907650917821,
     ),
-    freq_mid_hz=110000000,
-    freq_halfspan_hz=25000000,
+    freq_min_hz=85000000,
+    freq_max_hz=135000000,
+    traceability_string="examples/calibrations/AWG3_calibration_04_10_2024_98MHz_118MHz.awgde",
     amp_scale=0.002631578947368421,
     min_g=1e-12,
     min_v0_sq=1e-09,
     y_eps=1e-06,
 )
 
-CALIBS_BY_DATASET_KEY: dict[str, AODSin2Calib | MultiChannelAODSin2Calib] = {
+CALIBS_BY_DATASET_KEY: dict[str, AODSin2Calib | AWGCalibration] = {
     "814_calFile_17.02.2022_0=0": CALIB_814_CALFILE_17_02_2022_0_0,
     "AWG1_calibration_22_02_2023_90MHz_255MHz": AWG1_CALIBRATION_22_02_2023_90MHZ_255MHZ,
     "AWG3_calibration_04_10_2024_98MHz_118MHz": AWG3_CALIBRATION_04_10_2024_98MHZ_118MHZ,
 }
-

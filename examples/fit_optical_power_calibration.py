@@ -2,7 +2,7 @@
 Example wrapper for the optical-power calibration tool.
 
 Equivalent CLI invocation:
-  python -m awgsegmentfactory.tools.fit_optical_power_calibration --input-data-file examples/calibrations/814_H_calFile_17.02.2022_0=0.txt --input-data-format de-json --logical-channel H --plot
+  python -m awgsegmentfactory.tools.fit_optical_power_calibration --input-data-file examples/calibrations/814_H_calFile_17.02.2022_0=0.txt --input-data-format de-json --plot
 """
 
 from __future__ import annotations
@@ -26,8 +26,6 @@ def main() -> None:
             _default_calibration_file().as_posix(),
             "--input-data-format",
             "de-json",
-            "--logical-channel",
-            "H",
             "--plot",
         ]
     )

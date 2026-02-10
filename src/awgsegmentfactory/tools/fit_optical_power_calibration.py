@@ -1,5 +1,5 @@
 """
-Optical-power calibration tool (fit + optional diagnostics + characterization output).
+Optical-power calibration tool (fit + optional diagnostics + calibration output).
 
 Supported input formats:
 - DE-compensation JSON (typically `*.txt`) with keys:
@@ -14,7 +14,7 @@ Supported input formats:
 Outputs:
 - Fit metrics
 - `AODSin2Calib` Python snippet
-- Optional persisted characterization JSON via `--write-out`
+- Optional persisted AWG-calibration JSON via `--write-out`
 - Optional debug plots (`--plot`):
   - Input-data overview (2D DE map + DE-derived required RF-amplitude map)
   - Data/Model/Residual 2D fit surfaces with slice markers
@@ -25,7 +25,7 @@ Usage:
   python -m awgsegmentfactory.tools.fit_optical_power_calibration
   python -m awgsegmentfactory.tools.fit_optical_power_calibration --input-data-file examples/calibrations/814_H_calFile_17.02.2022_0=0.txt --plot --write-out examples/calibrations/H_characterisation.json
   python -m awgsegmentfactory.tools.fit_optical_power_calibration --input-data-file my_scan.csv --input-data-format csv --no-plot
-  python -m awgsegmentfactory.tools.fit_optical_power_calibration --input H=path/to/H_cal.txt --input V=path/to/V_cal.txt
+  python -m awgsegmentfactory.tools.fit_optical_power_calibration --input-data-file path/to/ch0.csv --input-data-file path/to/ch1.csv --logical-to-hardware-map H=0 --logical-to-hardware-map V=1
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from typing import Sequence
 
 import numpy as np
 
-from awgsegmentfactory.calibration_characterization import CalibrationCharacterization
+from awgsegmentfactory.calibration import AWGCalibration
 from awgsegmentfactory.debug.optical_power_calibration import (
     plot_sin2_fit_parameters,
     plot_sin2_fit_surfaces,
@@ -758,59 +758,89 @@ def _default_input_path() -> Path:
     return p_alt
 
 
-def _parse_inputs(items: Sequence[str]) -> list[tuple[str, Path]]:
+def _resolve_input_files(items: Sequence[str]) -> list[Path]:
     if not items:
-        return [("H", _default_input_path())]
-    out: list[tuple[str, Path]] = []
-    for item in items:
-        if "=" not in item:
-            raise SystemExit(f"--input must be logical_channel=path, got {item!r}")
-        lc, p = item.split("=", 1)
-        out.append((lc.strip(), Path(p)))
-    return out
+        return [_default_input_path()]
+    return [Path(str(x)) for x in items]
 
 
-def _parse_logical_to_channel_index(
-    items: Sequence[str], *, logical_channels_in_order: Sequence[str]
+def _parse_logical_to_hardware_map(
+    items: Sequence[str], *, n_ch: int
 ) -> dict[str, int]:
-    logicals = [str(x) for x in logical_channels_in_order]
+    if n_ch <= 0:
+        raise ValueError("n_ch must be > 0")
     if not items:
-        return {lc: i for i, lc in enumerate(logicals)}
+        return {f"ch{i}": i for i in range(n_ch)}
 
     out: dict[str, int] = {}
     for item in items:
         if "=" not in item:
             raise SystemExit(
-                f"--logical-to-channel-index must be logical=index, got {item!r}"
+                f"--logical-to-hardware-map must be logical=index, got {item!r}"
             )
-        lc, idx = item.split("=", 1)
-        out[str(lc).strip()] = int(idx)
+        logical, idx_str = item.split("=", 1)
+        key = str(logical).strip()
+        idx = int(idx_str)
+        if key in out:
+            raise SystemExit(f"Duplicate logical key in --logical-to-hardware-map: {key!r}")
+        out[key] = idx
 
-    expected = set(logicals)
-    got = set(out.keys())
-    if got != expected:
-        missing = sorted(expected - got)
-        extra = sorted(got - expected)
-        raise SystemExit(
-            "logical-to-channel-index keys must exactly match input logical channels; "
-            f"missing={missing}, extra={extra}"
-        )
-
-    idxs = sorted(set(int(v) for v in out.values()))
-    if idxs != list(range(len(logicals))):
-        raise SystemExit(
-            "logical-to-channel-index values must be contiguous indices 0..N-1 "
-            f"(got {idxs})"
-        )
+    used: set[int] = set()
+    for logical, idx in out.items():
+        if idx < 0 or idx >= int(n_ch):
+            raise SystemExit(
+                f"--logical-to-hardware-map index out of range: {logical!r}={idx}, "
+                f"expected 0..{int(n_ch) - 1}"
+            )
+        if idx in used:
+            raise SystemExit(
+                "--logical-to-hardware-map must be one-to-one "
+                f"(duplicate hardware index {idx})"
+            )
+        used.add(idx)
     return out
+
+
+def _resolve_traceability_strings(
+    *,
+    input_paths: Sequence[Path],
+    traceability_flags: Sequence[str],
+) -> list[str]:
+    n = len(input_paths)
+    provided = [str(x) for x in traceability_flags]
+    if not provided:
+        return [p.as_posix() for p in input_paths]
+    if len(provided) == 1 and n == 1:
+        return [provided[0]]
+    if len(provided) != n:
+        raise SystemExit(
+            "--traceability-string must be provided either once for single-channel input "
+            "or once per --input-data-file."
+        )
+    return provided
+
+
+def _logical_labels_for_hw_index(
+    logical_to_hardware_map: dict[str, int], *, hw_index: int
+) -> str:
+    labels = sorted(
+        logical for logical, idx in logical_to_hardware_map.items() if int(idx) == int(hw_index)
+    )
+    if not labels:
+        return f"ch{int(hw_index)}"
+    return "/".join(labels)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input-data-file",
-        default=None,
-        help="Single calibration input file path (preferred interface).",
+        action="append",
+        default=[],
+        help=(
+            "Calibration input path (repeatable). "
+            "If omitted, defaults to examples/calibrations/814_H_calFile_17.02.2022_0=0.txt."
+        ),
     )
     parser.add_argument(
         "--input-data-format",
@@ -819,29 +849,30 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Input data format. Defaults to extension/content inference.",
     )
     parser.add_argument(
-        "--logical-channel",
-        default="H",
-        help="Logical channel name used with --input-data-file (default: H).",
-    )
-    parser.add_argument(
-        "--logical-to-channel-index",
+        "--logical-to-hardware-map",
         action="append",
         default=[],
         help=(
-            "Map logical names to physical channel indices as logical=index (repeatable). "
-            "If omitted, indices are assigned by input order."
+            "Logical-to-hardware mapping as logical=index (repeatable). "
+            "If omitted, defaults to ch0->0, ch1->1, ..."
         ),
     )
     parser.add_argument(
-        "--input",
+        "--traceability-string",
         action="append",
         default=[],
-        help="Legacy interface: logical_channel=path (repeatable).",
+        help=(
+            "Traceability string for each channel calibration (repeatable). "
+            "If omitted, each input file path is used."
+        ),
     )
     parser.add_argument(
         "--var-name",
-        default="AOD_SIN2_CALIB",
-        help="Base Python variable name used for printed per-channel constants (suffix `_CH{index}`).",
+        default="AWG_CALIB",
+        help=(
+            "Base Python variable name used for printed constants. "
+            "Per-channel constants use suffix `_CH{index}`."
+        ),
     )
     parser.add_argument(
         "--plot",
@@ -852,7 +883,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--write-out",
         default=None,
-        help="If set, write a serialized calibration characterization JSON to this path.",
+        help="If set, write a serialized AWG calibration JSON to this path.",
     )
     parser.add_argument(
         "--csv-freq-unit",
@@ -904,19 +935,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     critical_mV = float(args.rf_amp_critical_mv)
     plot_enabled = bool(args.plot)
 
-    if args.input_data_file is not None:
-        if args.input:
-            raise SystemExit("Use either --input-data-file or --input, not both.")
-        inputs = [(str(args.logical_channel), Path(args.input_data_file))]
-    else:
-        inputs = _parse_inputs(args.input)
+    input_paths = _resolve_input_files(args.input_data_file)
+    n_ch = int(len(input_paths))
+    channel_keys = [f"ch{i}" for i in range(n_ch)]
+    traceability_strings = _resolve_traceability_strings(
+        input_paths=input_paths,
+        traceability_flags=args.traceability_string,
+    )
 
-    curves_by_lc: dict[str, tuple[OpticalPowerCalCurve, ...]] = {}
-    de_file_payload_by_lc: dict[str, tuple[Path, dict]] = {}
-    source_files_by_lc: dict[str, Path] = {}
-    source_format_by_lc: dict[str, str] = {}
-    for lc, path in inputs:
-        curves, payload, detected_format = _load_curves_from_input_file(
+    curves_by_channel: dict[str, tuple[OpticalPowerCalCurve, ...]] = {}
+    de_file_payload_by_channel: dict[str, tuple[Path, dict]] = {}
+    source_files_by_channel: dict[str, Path] = {}
+    for idx, path in enumerate(input_paths):
+        key = channel_keys[idx]
+        curves, payload, _detected_format = _load_curves_from_input_file(
             path,
             input_format=str(args.input_data_format),
             csv_freq_unit=str(args.csv_freq_unit),
@@ -929,77 +961,81 @@ def main(argv: Sequence[str] | None = None) -> None:
             if args.awgde_max_points_per_curve is not None
             else None,
         )
-        lc_key = str(lc)
-        curves_by_lc[lc_key] = curves
-        source_files_by_lc[lc_key] = path
-        source_format_by_lc[lc_key] = str(detected_format)
+        curves_by_channel[key] = curves
+        source_files_by_channel[key] = path
         if payload is not None:
-            de_file_payload_by_lc[lc_key] = payload
+            de_file_payload_by_channel[key] = payload
 
-    logical_channels_in_order = [str(lc) for lc, _ in inputs]
-    logical_to_channel_index = _parse_logical_to_channel_index(
-        args.logical_to_channel_index,
-        logical_channels_in_order=logical_channels_in_order,
+    logical_to_hardware_map = _parse_logical_to_hardware_map(
+        args.logical_to_hardware_map,
+        n_ch=n_ch,
     )
 
     fits_by_lc, freq_mid_hz, freq_halfspan_hz = fit_sin2_poly_model_by_logical_channel(
-        curves_by_lc,
+        curves_by_channel,
         degree_g=6,
         degree_v0=6,
         shared_freq_norm=True,
     )
-    amp_scale = suggest_amp_scale_from_curves(curves_by_lc)
-    channel_calibs_by_lc = {
-        lc: fit.to_aod_sin2_calib(amp_scale=float(amp_scale))
-        for lc, fit in fits_by_lc.items()
-    }
+    amp_scale = suggest_amp_scale_from_curves(curves_by_channel)
 
-    characterization = CalibrationCharacterization.from_fit(
-        channel_calibs_by_logical_channel=channel_calibs_by_lc,
-        curves_by_logical_channel=curves_by_lc,
-        fits_by_logical_channel=fits_by_lc,
-        logical_to_channel_index=logical_to_channel_index,
-        source_files_by_logical_channel=source_files_by_lc,
-        source_format_by_logical_channel=source_format_by_lc,
+    channel_calibrations: list = []
+    for idx, key in enumerate(channel_keys):
+        curves = curves_by_channel[key]
+        freqs_hz = np.asarray([float(c.freq_hz) for c in curves], dtype=float)
+        if freqs_hz.size == 0:
+            raise ValueError(f"No frequency data for {key}")
+        channel_calibrations.append(
+            fits_by_lc[key].to_aod_sin2_calib(
+                amp_scale=float(amp_scale),
+                freq_min_hz=float(np.min(freqs_hz)),
+                freq_max_hz=float(np.max(freqs_hz)),
+                traceability_string=str(traceability_strings[idx]),
+            )
+        )
+
+    awg_calibration = AWGCalibration(
+        N_ch=n_ch,
+        logical_to_hardware_map=logical_to_hardware_map,
+        channel_calibrations=tuple(channel_calibrations),
     )
 
     print("--- saturation calibration fit ---")
     print("model: sin2")
-    print("logical_channels:", sorted(curves_by_lc.keys()))
+    print("N_ch:", int(awg_calibration.N_ch))
+    print("logical_to_hardware_map:", dict(awg_calibration.logical_to_hardware_map))
     print("freq_mid_hz:", freq_mid_hz)
     print("freq_halfspan_hz:", freq_halfspan_hz)
     print("amp_scale:", float(amp_scale))
-    for lc, fit in fits_by_lc.items():
-        print(f"[{lc}] rmse={fit.rmse:.4g}  max|res|={fit.max_abs_resid:.4g}")
+    for idx, key in enumerate(channel_keys):
+        fit = fits_by_lc[key]
+        cal = channel_calibrations[idx]
+        print(f"[ch{idx}] rmse={fit.rmse:.4g}  max|res|={fit.max_abs_resid:.4g}")
+        print(
+            f"  freq_min_hz={float(cal.freq_min_hz):.6g}  "
+            f"freq_max_hz={float(cal.freq_max_hz):.6g}  best_freq_hz={int(cal.best_freq_hz)}"
+        )
+        print(f"  traceability_string={cal.traceability_string!r}")
 
     print("\n--- python constant ---")
-    print("from awgsegmentfactory.calibration import AODSin2Calib")
-    for logical, idx in sorted(logical_to_channel_index.items(), key=lambda kv: int(kv[1])):
+    print("from awgsegmentfactory.calibration import AODSin2Calib, AWGCalibration")
+    channel_var_names: list[str] = []
+    for idx, cal in enumerate(channel_calibrations):
         var_name = f"{str(args.var_name)}_CH{int(idx)}"
-        print(f"# logical_channel={logical!r}, physical_channel_index={int(idx)}")
-        print(aod_sin2_calib_to_python(channel_calibs_by_lc[logical], var_name=var_name))
-    print(f"LOGICAL_TO_CHANNEL_INDEX = {logical_to_channel_index!r}")
-
-    print("\n--- characterization summary ---")
-    print("freq_min_hz:", float(characterization.freq_min_hz))
-    print("freq_max_hz:", float(characterization.freq_max_hz))
-    logicals_at_peak = sorted(
-        lc
-        for lc, idx in characterization.logical_to_channel_index.items()
-        if int(idx) == int(characterization.highest_de_channel_index)
-    )
-    print(
-        "highest_de_freq_hz / highest_de_channel_index:",
-        float(characterization.highest_de_freq_hz),
-        int(characterization.highest_de_channel_index),
-        f"[logical_channels={logicals_at_peak}]",
-    )
-    print("highest_de_value:", float(characterization.highest_de_value))
+        channel_var_names.append(var_name)
+        print(aod_sin2_calib_to_python(cal, var_name=var_name))
+    tuple_suffix = "," if len(channel_var_names) == 1 else ""
+    tuple_expr = "(" + ", ".join(channel_var_names) + tuple_suffix + ")"
+    print(f"{str(args.var_name)} = AWGCalibration(")
+    print(f"    N_ch={int(awg_calibration.N_ch)},")
+    print(f"    logical_to_hardware_map={dict(awg_calibration.logical_to_hardware_map)!r},")
+    print(f"    channel_calibrations={tuple_expr},")
+    print(")")
 
     if args.write_out is not None:
         out = Path(str(args.write_out))
-        characterization.to_file(out)
-        print("\n--- characterization file ---")
+        awg_calibration.to_file(out)
+        print("\n--- calibration file ---")
         print(out.as_posix())
 
     if not plot_enabled:
@@ -1012,16 +1048,20 @@ def main(argv: Sequence[str] | None = None) -> None:
             "This example requires matplotlib. Install the `dev` dependency group or use --no-plot."
         ) from exc
 
-    for lc in sorted(curves_by_lc.keys()):
-        path = source_files_by_lc[lc]
-        payload = de_file_payload_by_lc.get(lc)
+    for idx, key in enumerate(channel_keys):
+        path = source_files_by_channel[key]
+        payload = de_file_payload_by_channel.get(key)
         de_rf = payload[1] if payload is not None else None
-        print(f"\n=== plots: {path} [{lc}] ===")
+        label = _logical_labels_for_hw_index(
+            logical_to_hardware_map,
+            hw_index=idx,
+        )
+        print(f"\n=== plots: {path} [{label}] ===")
         _plot_channel_debug_figures(
             path,
-            logical_channel=lc,
-            curves=curves_by_lc[lc],
-            fit=fits_by_lc[lc],
+            logical_channel=label,
+            curves=curves_by_channel[key],
+            fit=fits_by_lc[key],
             de_rf=de_rf,
             warn_mV=warn_mV,
             critical_mV=critical_mV,

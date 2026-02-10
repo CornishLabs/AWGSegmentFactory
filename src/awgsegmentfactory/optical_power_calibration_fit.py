@@ -341,13 +341,25 @@ class Sin2PolyFitResult:
         amp_scale: float,
         min_g: float = 1e-12,
         y_eps: float = 1e-6,
+        freq_min_hz: float | None = None,
+        freq_max_hz: float | None = None,
+        traceability_string: str = "",
     ) -> AODSin2Calib:
         """Build an `AODSin2Calib` suitable for the synthesis pipeline."""
+        if freq_min_hz is None:
+            freq_min = float(np.min(np.asarray(self.freqs_hz, dtype=float)))
+        else:
+            freq_min = float(freq_min_hz)
+        if freq_max_hz is None:
+            freq_max = float(np.max(np.asarray(self.freqs_hz, dtype=float)))
+        else:
+            freq_max = float(freq_max_hz)
         return AODSin2Calib(
             g_poly_high_to_low=tuple(float(x) for x in self.coeffs_g_high_to_low),
             v0_a_poly_high_to_low=tuple(float(x) for x in self.coeffs_v0_a_high_to_low),
-            freq_mid_hz=float(self.freq_mid_hz),
-            freq_halfspan_hz=float(self.freq_halfspan_hz),
+            freq_min_hz=freq_min,
+            freq_max_hz=freq_max,
+            traceability_string=str(traceability_string),
             amp_scale=float(amp_scale),
             min_g=float(min_g),
             min_v0_sq=float(self.min_v0_sq_mV2),
@@ -663,13 +675,25 @@ def build_aod_sin2_calib_from_fit(
     amp_scale: float,
     min_g: float = 1e-12,
     y_eps: float = 1e-6,
+    freq_min_hz: float | None = None,
+    freq_max_hz: float | None = None,
+    traceability_string: str = "",
 ) -> AODSin2Calib:
     """Build a single-channel `AODSin2Calib` from one fit result."""
+    if freq_min_hz is None:
+        freq_min = float(np.min(np.asarray(fit.freqs_hz, dtype=float)))
+    else:
+        freq_min = float(freq_min_hz)
+    if freq_max_hz is None:
+        freq_max = float(np.max(np.asarray(fit.freqs_hz, dtype=float)))
+    else:
+        freq_max = float(freq_max_hz)
     return AODSin2Calib(
         g_poly_high_to_low=tuple(float(x) for x in fit.coeffs_g_high_to_low),
         v0_a_poly_high_to_low=tuple(float(x) for x in fit.coeffs_v0_a_high_to_low),
-        freq_mid_hz=float(fit.freq_mid_hz),
-        freq_halfspan_hz=float(fit.freq_halfspan_hz),
+        freq_min_hz=freq_min,
+        freq_max_hz=freq_max,
+        traceability_string=str(traceability_string),
         amp_scale=float(amp_scale),
         min_g=float(min_g),
         min_v0_sq=float(fit.min_v0_sq_mV2),
@@ -692,8 +716,9 @@ def aod_sin2_calib_to_python(
             f"{var_name} = AODSin2Calib(",
             f"    g_poly_high_to_low={_fmt_tuple(calib.g_poly_high_to_low)},",
             f"    v0_a_poly_high_to_low={_fmt_tuple(calib.v0_a_poly_high_to_low)},",
-            f"    freq_mid_hz={float(calib.freq_mid_hz):.16g},",
-            f"    freq_halfspan_hz={float(calib.freq_halfspan_hz):.16g},",
+            f"    freq_min_hz={float(calib.freq_min_hz):.16g},",
+            f"    freq_max_hz={float(calib.freq_max_hz):.16g},",
+            f"    traceability_string={calib.traceability_string!r},",
             f"    amp_scale={float(calib.amp_scale):.16g},",
             f"    min_g={float(calib.min_g):.16g},",
             f"    min_v0_sq={float(calib.min_v0_sq):.16g},",
