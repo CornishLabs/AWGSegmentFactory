@@ -9,12 +9,11 @@ from time import perf_counter
 from typing import Callable, Optional, Sequence
 
 from ..builder import AWGProgramBuilder
-from ..calibration import OpticalPowerToRFAmpCalib
+from ..calibration import AWGPhysicalSetupInfo
 from ..intent_ir import IntentIR
 from ..resolve import resolve_intent_ir
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
 from ..quantize import quantize_resolved_ir
-from ..types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -33,8 +32,7 @@ def compile_builder_pipeline_timed(
     builder: AWGProgramBuilder,
     *,
     sample_rate_hz: float,
-    logical_channel_to_hardware_channel: ChannelMap,
-    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
+    physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
@@ -43,6 +41,8 @@ def compile_builder_pipeline_timed(
     """
     Compile end-to-end (Builder -> IntentIR -> ResolvedIR -> QuantizedIR -> samples),
     returning both the compiled program and per-stage wall-clock timings.
+
+    If `physical_setup` is omitted, an identity logical->hardware mapping is used.
     """
     t0 = perf_counter()
     intent = builder.build_intent_ir()
@@ -62,13 +62,15 @@ def compile_builder_pipeline_timed(
     t3 = perf_counter()
     quantized = quantize_resolved_ir(resolved)
     t4 = perf_counter()
+    setup = physical_setup
+    if setup is None:
+        setup = AWGPhysicalSetupInfo.identity(quantized.logical_channels)
     compiled = compile_sequence_program(
         quantized,
+        physical_setup=setup,
         gain=gain,
         clip=clip,
         full_scale=full_scale,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-        optical_power_calib=optical_power_calib,
         gpu=gpu,
     )
     if gpu:
@@ -97,8 +99,7 @@ def benchmark_builder_pipeline(
     build_builder: Callable[[], AWGProgramBuilder],
     *,
     sample_rate_hz: float,
-    logical_channel_to_hardware_channel: ChannelMap,
-    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
+    physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     iters: int = 5,
     warmup: int = 1,
     gain: float = 1.0,
@@ -125,8 +126,7 @@ def benchmark_builder_pipeline(
         _compiled, timing = compile_builder_pipeline_timed(
             builder,
             sample_rate_hz=sample_rate_hz,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-            optical_power_calib=optical_power_calib,
+            physical_setup=physical_setup,
             gain=gain,
             clip=clip,
             full_scale=full_scale,

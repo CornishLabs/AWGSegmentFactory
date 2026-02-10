@@ -1,7 +1,9 @@
-"""Sample synthesis: `QuantizedIR` → `CompiledSequenceProgram`.
+"""Sample synthesis and sample quantization.
 
-This stage synthesizes per-segment, per-channel int16 samples (pattern memory) and
-builds a simple step table (sequence memory) that chains segments in order.
+Pipeline in this module:
+- `synthesize_sequence_program`: `QuantizedIR` -> float waveform buffers
+- `quantize_synthesized_program`: float buffers -> int16 buffers
+- `compile_sequence_program`: convenience wrapper for both stages
 """
 
 from __future__ import annotations
@@ -11,17 +13,27 @@ from typing import Any, Literal, Optional, Tuple
 
 import numpy as np
 
-from .calibration import OpticalPowerToRFAmpCalib
+from .calibration import AWGPhysicalSetupInfo, OpticalPowerToRFAmpCalib
 from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 from .interpolation import interp_param
 from .phase_minimiser import minimise_crest_factor_phases
 from .quantize import QuantizedIR, SegmentQuantizationInfo
-from .types import ChannelMap
+
+
+@dataclass(frozen=True)
+class SynthesizedSegment:
+    """One synthesized hardware segment: float waveform per hardware channel."""
+
+    name: str
+    n_samples: int
+    # (n_channels, n_samples); NumPy by default. When `synthesize_sequence_program(..., output="cupy")`,
+    # this may be a CuPy ndarray (device resident).
+    data: Any
 
 
 @dataclass(frozen=True)
 class CompiledSegment:
-    """One compiled hardware segment: an int16 array per hardware channel."""
+    """One quantized hardware segment: an int16 array per hardware channel."""
 
     name: str
     n_samples: int
@@ -42,11 +54,22 @@ class SequenceStep:
 
 
 @dataclass(frozen=True)
-class CompiledSequenceProgram:
-    """Final compiler output: segments (pattern memory) plus steps (sequence memory)."""
+class SynthesizedSequenceProgram:
+    """Float synthesis output: per-segment waveforms and sequence table."""
 
     sample_rate_hz: float
-    logical_channel_to_hardware_channel: ChannelMap
+    physical_setup: AWGPhysicalSetupInfo
+    segments: Tuple[SynthesizedSegment, ...]
+    steps: Tuple[SequenceStep, ...]
+    quantization: Tuple[SegmentQuantizationInfo, ...]
+
+
+@dataclass(frozen=True)
+class CompiledSequenceProgram:
+    """Final compiler output: int16 segments (pattern memory) plus steps."""
+
+    sample_rate_hz: float
+    physical_setup: AWGPhysicalSetupInfo
     gain: float
     clip: float
     full_scale: int
@@ -239,7 +262,7 @@ def _plan_segment_start_phases(
     return start_phases
 
 
-def _interp_logical_channel_part(
+def interp_logical_channel_part(
     pp: ResolvedLogicalChannelPart,
     *,
     n_samples: int,
@@ -310,7 +333,7 @@ def _synth_part(
     - y is (n_samples,) float waveform
     - phase_end is (n_tones,) phase at the end of the part (for continue)
     """
-    freqs, amps = _interp_logical_channel_part(
+    freqs, amps = interp_logical_channel_part(
         pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz, xp=xp
     )
     if int(freqs.shape[1]) != int(phase0_rad.shape[0]):
@@ -425,15 +448,44 @@ def _cupy_or_raise():
     return cp
 
 
+def synthesized_sequence_program_to_numpy(
+    prog: SynthesizedSequenceProgram,
+) -> SynthesizedSequenceProgram:
+    """Convert synthesized float segment buffers to CPU/NumPy arrays."""
+    out_segments: list[SynthesizedSegment] = []
+    for seg in prog.segments:
+        data = seg.data
+        if isinstance(data, np.ndarray):
+            out_segments.append(seg)
+            continue
+        try:
+            import cupy as cp  # type: ignore
+
+            data_np = cp.asnumpy(data)
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "Cannot convert synthesized segment data to NumPy (CuPy not available?)."
+            ) from exc
+        out_segments.append(
+            SynthesizedSegment(name=seg.name, n_samples=seg.n_samples, data=data_np)
+        )
+
+    if all(a is b for a, b in zip(out_segments, prog.segments, strict=True)):
+        return prog
+
+    return SynthesizedSequenceProgram(
+        sample_rate_hz=prog.sample_rate_hz,
+        physical_setup=prog.physical_setup,
+        segments=tuple(out_segments),
+        steps=tuple(prog.steps),
+        quantization=tuple(prog.quantization),
+    )
+
+
 def compiled_sequence_program_to_numpy(
     prog: CompiledSequenceProgram,
 ) -> CompiledSequenceProgram:
-    """
-    Convert a compiled program to CPU/NumPy arrays.
-
-    This is a no-op if segment buffers are already NumPy. If segment buffers are CuPy,
-    this performs a device->host transfer for each segment buffer.
-    """
+    """Convert compiled int16 segment buffers to CPU/NumPy arrays."""
     out_segments: list[CompiledSegment] = []
     for seg in prog.segments:
         data = seg.data_i16
@@ -457,7 +509,7 @@ def compiled_sequence_program_to_numpy(
 
     return CompiledSequenceProgram(
         sample_rate_hz=prog.sample_rate_hz,
-        logical_channel_to_hardware_channel=dict(prog.logical_channel_to_hardware_channel),
+        physical_setup=prog.physical_setup,
         gain=float(prog.gain),
         clip=float(prog.clip),
         full_scale=int(prog.full_scale),
@@ -467,111 +519,22 @@ def compiled_sequence_program_to_numpy(
     )
 
 
-def _validate_channel_map(
-    logical_channels: tuple[str, ...],
-    logical_channel_to_hardware_channel: Optional[ChannelMap],
-) -> tuple[ChannelMap, int]:
-    if logical_channel_to_hardware_channel is None:
-        mapping: ChannelMap = {
-            str(logical_channel): i
-            for i, logical_channel in enumerate(logical_channels)
-        }
-    else:
-        mapping = {
-            str(k): int(v) for k, v in logical_channel_to_hardware_channel.items()
-        }
-
-    missing = [lc for lc in logical_channels if lc not in mapping]
-    if missing:
-        raise KeyError(
-            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
-        )
-    hw = [int(mapping[lc]) for lc in logical_channels]
-    if any(h < 0 for h in hw):
-        raise ValueError(
-            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
-        )
-    if len(set(hw)) != len(hw):
-        raise ValueError(
-            "Each logical channel must map to a unique hardware channel; "
-            f"got {sorted(hw)} for logical_channels={list(logical_channels)}"
-        )
-    hw_set = set(hw)
-    if hw_set != set(range(len(hw_set))):
-        raise ValueError(
-            "Hardware channel indices must be contiguous 0..N-1; "
-            f"got {sorted(hw_set)}"
-        )
-    return mapping, len(hw_set)
-
-
-def compile_sequence_program(
+def synthesize_sequence_program(
     quantized: QuantizedIR,
     *,
-    gain: float,
-    clip: float,
-    full_scale: int,
-    logical_channel_to_hardware_channel: Optional[ChannelMap] = None,
-    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
+    physical_setup: AWGPhysicalSetupInfo,
     gpu: bool = False,
     output: Literal["numpy", "cupy"] = "numpy",
-) -> CompiledSequenceProgram:
+) -> SynthesizedSequenceProgram:
     """
-    Compile a QuantizedIR into per-segment, per-channel int16 sample arrays suitable
-    for writing into an AWG "sequence mode" pattern memory.
+    Synthesize float per-segment, per-channel waveform buffers.
 
-    Optical-power calibration (optional):
-    - If `optical_power_calib` is provided, `amps` in the IR are interpreted as desired
-      optical power (or a proxy), and are converted to RF synthesis amplitudes during
-      sample synthesis.
-      - Typical object: `AWGCalibration` from `awgsegmentfactory.calibration`.
-    - If `optical_power_calib is None`, `amps` are treated as direct RF synthesis
-      amplitudes.
-
-    GPU mode (`gpu=True`):
-    - Uses CuPy for the inner synthesis math in `_synth_part`:
-      interpolation, phase accumulation (`cumsum`), `sin`, and tone summation.
-    - Applies gain/clip and int16 quantization on the GPU.
-    - Output buffers:
-      - `output="numpy"`: transfers the final `(n_channels, n_samples)` int16 segment buffer
-        back to NumPy once per segment (device->host).
-      - `output="cupy"`: keeps int16 buffers on the GPU as CuPy arrays (no device->host copy).
-
-    Note: resolve/quantize stages are still CPU/NumPy.
-
-    Channel mapping:
-    - `logical_channel_to_hardware_channel` controls how logical channels map into output
-      rows of each compiled segment buffer.
-    - If omitted, a default contiguous mapping in logical-channel order is used.
-
-    Phase modes:
-    - Each segment has `phase_mode in {"manual","continue","optimise"}`.
-    - `"continue"`/`"optimise"` may run a small CPU-side crest-factor phase optimiser
-      before synthesis. This is independent of `gpu=True` (the optimiser itself is CPU).
+    This stage applies optional optical-power calibration from `physical_setup`.
+    It does not apply gain/clip/full_scale int16 quantization.
     """
-    if gain <= 0:
-        raise ValueError("gain must be > 0")
-    if not (0 < clip <= 1.0):
-        raise ValueError("clip must be in (0, 1]")
-    if full_scale <= 0:
-        raise ValueError("full_scale must be > 0")
-    max_i16 = int(np.iinfo(np.int16).max)
-    if full_scale > max_i16:
-        raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
-
     q_ir = quantized.resolved_ir
-    logical_channel_to_hardware_channel, n_channels = _validate_channel_map(
-        q_ir.logical_channels, logical_channel_to_hardware_channel
-    )
     q_info = quantized.quantization
-    amp_calib = optical_power_calib
-
-    n_segments = len(q_ir.segments)
-    if n_segments == 0:
-        raise ValueError("No segments to compile")
-
-    compiled_segments: list[CompiledSegment] = []
-    compiled_steps: list[SequenceStep] = []
+    amp_calib: Optional[OpticalPowerToRFAmpCalib] = physical_setup
 
     if output not in ("numpy", "cupy"):
         raise ValueError("output must be 'numpy' or 'cupy'")
@@ -584,15 +547,28 @@ def compile_sequence_program(
         cp = _cupy_or_raise()
         xp = cp
 
+    # Validate mapping for all used logical channels before synthesis.
+    for logical_channel in q_ir.logical_channels:
+        physical_setup.hardware_channel(logical_channel)
+
+    n_channels = int(physical_setup.N_ch)
+    n_segments = len(q_ir.segments)
+    if n_segments == 0:
+        raise ValueError("No segments to synthesize")
+
+    out_segments: list[SynthesizedSegment] = []
+    out_steps: list[SequenceStep] = []
+
     # Phase state carried across segments, per logical channel.
     phase_state: dict[str, _PhaseContinueState] = {}
 
     for i, seg in enumerate(q_ir.segments):
-        n = seg.n_samples
-        data = xp.zeros((n_channels, n), dtype=xp.int16)
+        n = int(seg.n_samples)
+        dtype = xp.float32 if xp is not np else float
+        data = xp.zeros((n_channels, n), dtype=dtype)
 
         for logical_channel in q_ir.logical_channels:
-            hw_ch = int(logical_channel_to_hardware_channel[logical_channel])
+            hw_ch = int(physical_setup.hardware_channel(logical_channel))
             y, phase_out = _synth_logical_channel_segment(
                 seg,
                 logical_channel=logical_channel,
@@ -601,7 +577,7 @@ def compile_sequence_program(
                 amp_calib=amp_calib,
                 xp=xp,
             )
-            # Keep continue state on CPU; it is tiny compared to the waveform buffers.
+            # Keep continue state on CPU; it is tiny compared to waveform buffers.
             if cp is not None:
                 phase_out_np = cp.asnumpy(phase_out)
             else:
@@ -612,23 +588,20 @@ def compile_sequence_program(
             phase_state[logical_channel] = _PhaseContinueState(
                 freqs_hz=end_freqs_np, phases_rad=phase_out_np
             )
-
-            y = xp.clip(gain * y, -float(clip), float(clip))
-            samp = xp.rint(y * float(full_scale)).astype(xp.int16)
-            data[hw_ch, :] = samp
+            data[hw_ch, :] = y
 
         if cp is not None and output == "numpy":
-            data_i16 = cp.asnumpy(data)
+            data_out = cp.asnumpy(data)
         else:
-            data_i16 = data
+            data_out = data
 
-        compiled_segments.append(
-            CompiledSegment(name=seg.name, n_samples=n, data_i16=data_i16)
+        out_segments.append(
+            SynthesizedSegment(name=seg.name, n_samples=n, data=data_out)
         )
 
         on_trig = seg.mode == "wait_trig"
         loops = int(seg.loop) if seg.mode == "loop_n" else 1
-        compiled_steps.append(
+        out_steps.append(
             SequenceStep(
                 step_index=i,
                 segment_index=i,
@@ -638,13 +611,92 @@ def compile_sequence_program(
             )
         )
 
-    return CompiledSequenceProgram(
+    return SynthesizedSequenceProgram(
         sample_rate_hz=q_ir.sample_rate_hz,
-        logical_channel_to_hardware_channel=dict(logical_channel_to_hardware_channel),
+        physical_setup=physical_setup,
+        segments=tuple(out_segments),
+        steps=tuple(out_steps),
+        quantization=tuple(q_info),
+    )
+
+
+def quantize_synthesized_program(
+    synthesized: SynthesizedSequenceProgram,
+    *,
+    gain: float,
+    clip: float,
+    full_scale: int,
+) -> CompiledSequenceProgram:
+    """Apply gain/clip/full_scale and convert float segment buffers to int16."""
+    if gain <= 0:
+        raise ValueError("gain must be > 0")
+    if not (0 < clip <= 1.0):
+        raise ValueError("clip must be in (0, 1]")
+    if full_scale <= 0:
+        raise ValueError("full_scale must be > 0")
+    max_i16 = int(np.iinfo(np.int16).max)
+    if full_scale > max_i16:
+        raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
+
+    out_segments: list[CompiledSegment] = []
+    for seg in synthesized.segments:
+        data = seg.data
+        if isinstance(data, np.ndarray):
+            y = np.clip(float(gain) * data, -float(clip), float(clip))
+            data_i16 = np.rint(y * float(full_scale)).astype(np.int16)
+        else:
+            try:
+                import cupy as cp  # type: ignore
+
+                y = cp.clip(float(gain) * data, -float(clip), float(clip))
+                data_i16 = cp.rint(y * float(full_scale)).astype(cp.int16)
+            except Exception as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "Failed to quantize synthesized CuPy segment buffer."
+                ) from exc
+
+        out_segments.append(
+            CompiledSegment(
+                name=seg.name,
+                n_samples=seg.n_samples,
+                data_i16=data_i16,
+            )
+        )
+
+    return CompiledSequenceProgram(
+        sample_rate_hz=synthesized.sample_rate_hz,
+        physical_setup=synthesized.physical_setup,
         gain=float(gain),
         clip=float(clip),
         full_scale=int(full_scale),
-        segments=tuple(compiled_segments),
-        steps=tuple(compiled_steps),
-        quantization=tuple(q_info),
+        segments=tuple(out_segments),
+        steps=tuple(synthesized.steps),
+        quantization=tuple(synthesized.quantization),
+    )
+
+
+def compile_sequence_program(
+    quantized: QuantizedIR,
+    *,
+    physical_setup: AWGPhysicalSetupInfo,
+    gain: float,
+    clip: float,
+    full_scale: int,
+    gpu: bool = False,
+    output: Literal["numpy", "cupy"] = "numpy",
+) -> CompiledSequenceProgram:
+    """
+    Convenience wrapper: synthesize float buffers then quantize to int16.
+    """
+    synthesized = synthesize_sequence_program(
+        quantized,
+        physical_setup=physical_setup,
+        gpu=gpu,
+        output=output,
+    )
+    return quantize_synthesized_program(
+        synthesized,
+        gain=gain,
+        clip=clip,
+        full_scale=full_scale,
     )

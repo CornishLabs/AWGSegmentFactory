@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory.calibration import AODSin2Calib
+from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 from awgsegmentfactory.intent_ir import InterpSpec
 from awgsegmentfactory.quantize import quantize_resolved_ir
 from awgsegmentfactory.resolved_ir import (
@@ -20,10 +20,10 @@ class TestAODSin2Calib(unittest.TestCase):
         # g(freq)=1, v0(freq)=1 (approximately), so:
         #   y = sin^2((pi/2)*(a/v0))  ->  a = v0*(2/pi)*arcsin(sqrt(y))
         calib = AODSin2Calib(
-            g_poly_by_logical_channel={"*": (1.0,)},
-            v0_a_poly_by_logical_channel={"*": (1.0,)},
-            freq_mid_hz=0.0,
-            freq_halfspan_hz=1.0,
+            g_poly_high_to_low=(1.0,),
+            v0_a_poly_high_to_low=(1.0,),
+            freq_min_hz=0.0,
+            freq_max_hz=1.0,
             amp_scale=1.0,
             min_g=1e-12,
             min_v0_sq=1e-30,
@@ -64,10 +64,10 @@ class TestAODSin2Calib(unittest.TestCase):
         )
 
         calib = AODSin2Calib(
-            g_poly_by_logical_channel={"*": (1.0,)},
-            v0_a_poly_by_logical_channel={"*": (1.0,)},
-            freq_mid_hz=0.0,
-            freq_halfspan_hz=1.0,
+            g_poly_high_to_low=(1.0,),
+            v0_a_poly_high_to_low=(1.0,),
+            freq_min_hz=0.0,
+            freq_max_hz=1.0,
             amp_scale=1.0,
             min_v0_sq=1e-30,
         )
@@ -78,12 +78,16 @@ class TestAODSin2Calib(unittest.TestCase):
             segments=(seg0,),
         )
         q = quantize_resolved_ir(ir)
+        physical_setup = AWGPhysicalSetupInfo(
+            logical_to_hardware_map={"H": 0},
+            channel_calibrations=(calib,),
+        )
         prog = compile_sequence_program(
             q,
+            physical_setup=physical_setup,
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
-            optical_power_calib=calib,
         )
 
         expected_amp = float((2.0 / np.pi) * np.arcsin(np.sqrt(0.25)))

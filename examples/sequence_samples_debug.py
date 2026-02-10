@@ -7,7 +7,7 @@ In Jupyter, you may want:
 
 from __future__ import annotations
 
-from awgsegmentfactory import AWGProgramBuilder, ResolvedIR
+from awgsegmentfactory import AWGPhysicalSetupInfo, AWGProgramBuilder, ResolvedIR
 from awgsegmentfactory.debug import LinearFreqToPos, sequence_samples_debug
 
 
@@ -37,6 +37,7 @@ def main() -> None:
     fs = 625e6
 
     ir = _build_demo_program(sample_rate_hz=fs)
+    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 
     # Optional: map frequency to "position units" for a 2D spot-grid view.
     fx = LinearFreqToPos(f0_hz=100e6, slope_hz_per_unit=250e3)  # e.g. µm if 250 kHz/µm
@@ -44,7 +45,7 @@ def main() -> None:
 
     fig, axs, slider = sequence_samples_debug(
         ir,
-        logical_channel_to_hardware_channel={"H": 0, "V": 1},
+        physical_setup=physical_setup,
         wait_trig_loops=3,
         include_wrap_preview=True,
         window_samples=None,  # show the whole unrolled sequence; zoom in with the GUI

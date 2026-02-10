@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
+from awgsegmentfactory.calibration import AWGPhysicalSetupInfo
 from awgsegmentfactory.intent_ir import HoldOp, RemapFromDefOp, UseDefOp
 from awgsegmentfactory.quantize import quantize_resolved_ir
 from awgsegmentfactory.synth_samples import compile_sequence_program
@@ -192,6 +193,7 @@ class TestBuilder(unittest.TestCase):
         quantized = quantize_resolved_ir(ir)
         prog = compile_sequence_program(
             quantized,
+            physical_setup=AWGPhysicalSetupInfo.identity(quantized.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=20000,

@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from awgsegmentfactory.calibration import AWGPhysicalSetupInfo
 from awgsegmentfactory.intent_ir import InterpSpec
 from awgsegmentfactory.interpolation import interp_param
 from awgsegmentfactory.quantize import quantize_resolved_ir
@@ -82,6 +83,7 @@ class TestInterpolation(unittest.TestCase):
         quantized = quantize_resolved_ir(ir)
         prog = compile_sequence_program(
             quantized,
+            physical_setup=AWGPhysicalSetupInfo.identity(quantized.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=20000,

@@ -14,7 +14,7 @@ Supported input formats:
 Outputs:
 - Fit metrics
 - `AODSin2Calib` Python snippet
-- Optional persisted AWG-calibration JSON via `--write-out`
+- Optional persisted AWG physical-setup JSON via `--write-out`
 - Optional debug plots (`--plot`):
   - Input-data overview (2D DE map + DE-derived required RF-amplitude map)
   - Data/Model/Residual 2D fit surfaces with slice markers
@@ -37,7 +37,7 @@ from typing import Sequence
 
 import numpy as np
 
-from awgsegmentfactory.calibration import AWGCalibration
+from awgsegmentfactory.calibration import AWGPhysicalSetupInfo
 from awgsegmentfactory.debug.optical_power_calibration import (
     plot_sin2_fit_parameters,
     plot_sin2_fit_surfaces,
@@ -883,7 +883,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--write-out",
         default=None,
-        help="If set, write a serialized AWG calibration JSON to this path.",
+        help="If set, write a serialized AWG physical-setup JSON to this path.",
     )
     parser.add_argument(
         "--csv-freq-unit",
@@ -994,16 +994,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         )
 
-    awg_calibration = AWGCalibration(
-        N_ch=n_ch,
+    physical_setup = AWGPhysicalSetupInfo(
         logical_to_hardware_map=logical_to_hardware_map,
         channel_calibrations=tuple(channel_calibrations),
     )
 
     print("--- saturation calibration fit ---")
     print("model: sin2")
-    print("N_ch:", int(awg_calibration.N_ch))
-    print("logical_to_hardware_map:", dict(awg_calibration.logical_to_hardware_map))
+    print("N_ch:", int(physical_setup.N_ch))
+    print("logical_to_hardware_map:", dict(physical_setup.logical_to_hardware_map))
     print("freq_mid_hz:", freq_mid_hz)
     print("freq_halfspan_hz:", freq_halfspan_hz)
     print("amp_scale:", float(amp_scale))
@@ -1018,7 +1017,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"  traceability_string={cal.traceability_string!r}")
 
     print("\n--- python constant ---")
-    print("from awgsegmentfactory.calibration import AODSin2Calib, AWGCalibration")
+    print("from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo")
     channel_var_names: list[str] = []
     for idx, cal in enumerate(channel_calibrations):
         var_name = f"{str(args.var_name)}_CH{int(idx)}"
@@ -1026,16 +1025,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(aod_sin2_calib_to_python(cal, var_name=var_name))
     tuple_suffix = "," if len(channel_var_names) == 1 else ""
     tuple_expr = "(" + ", ".join(channel_var_names) + tuple_suffix + ")"
-    print(f"{str(args.var_name)} = AWGCalibration(")
-    print(f"    N_ch={int(awg_calibration.N_ch)},")
-    print(f"    logical_to_hardware_map={dict(awg_calibration.logical_to_hardware_map)!r},")
+    print(f"{str(args.var_name)} = AWGPhysicalSetupInfo(")
+    print(f"    logical_to_hardware_map={dict(physical_setup.logical_to_hardware_map)!r},")
     print(f"    channel_calibrations={tuple_expr},")
     print(")")
 
     if args.write_out is not None:
         out = Path(str(args.write_out))
-        awg_calibration.to_file(out)
-        print("\n--- calibration file ---")
+        physical_setup.to_file(out)
+        print("\n--- physical setup file ---")
         print(out.as_posix())
 
     if not plot_enabled:

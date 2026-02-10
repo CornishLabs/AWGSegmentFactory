@@ -1,7 +1,8 @@
 """Calibration helpers for higher-level, position-like operations.
 
 The core compilation pipeline operates on frequency deltas directly. Optical-power
-calibrations are applied at compile time via `compile_sequence_program(..., optical_power_calib=...)`.
+calibrations are applied at synthesis time via
+`synthesize_sequence_program(..., physical_setup=...)`.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -43,7 +44,7 @@ class OpticalPowerToRFAmpCalib(ABC):
     but the actual multisine waveform that drives the AOD should use RF amplitudes
     derived from a per-tone model (diffraction efficiency, amplifier response, etc).
 
-    This is applied during sample synthesis (`compile_sequence_program(...)`) and is
+    This is applied during sample synthesis (`synthesize_sequence_program(...)`) and is
     also used for crest-factor phase optimisation so the optimiser sees the correct
     RF tone weights.
 
@@ -220,47 +221,75 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
 
 
 @dataclass(frozen=True)
-class AWGCalibration(OpticalPowerToRFAmpCalib):
+class AWGPhysicalSetupInfo(OpticalPowerToRFAmpCalib):
     """
-    AWG-level optical-power calibration container.
+    Physical AWG setup information:
+    - logical -> hardware channel routing
+    - optional per-hardware-channel optical-power calibration.
 
-    - `N_ch`: number of physical AWG channels.
-    - `logical_to_hardware_map`: logical name -> hardware channel index.
-    - `channel_calibrations[i]`: calibration for hardware channel index `i`.
+    If a channel has no calibration (`None`), amplitudes are interpreted as direct RF
+    synthesis amplitudes for that channel.
     """
 
-    N_ch: int
     logical_to_hardware_map: Dict[str, int]
-    channel_calibrations: Tuple[AODSin2Calib, ...]
+    channel_calibrations: Tuple[Optional[AODSin2Calib], ...] = tuple()
 
     def __post_init__(self) -> None:
-        n_ch = int(self.N_ch)
-        if n_ch <= 0:
-            raise ValueError("N_ch must be > 0")
-
-        mapping = {str(k): int(v) for k, v in dict(self.logical_to_hardware_map).items()}
+        mapping = {
+            str(k): int(v) for k, v in dict(self.logical_to_hardware_map).items()
+        }
         if not mapping:
             raise ValueError("logical_to_hardware_map must not be empty")
 
-        calibs = tuple(self.channel_calibrations)
-        if len(calibs) != n_ch:
+        hw = sorted(set(mapping.values()))
+        if any(h < 0 for h in hw):
             raise ValueError(
-                f"channel_calibrations length ({len(calibs)}) must equal N_ch ({n_ch})"
+                f"Hardware channel indices must be >= 0, got {hw}"
             )
+        if hw != list(range(len(hw))):
+            raise ValueError(
+                "Hardware channel indices must be contiguous 0..N-1; "
+                f"got {hw}"
+            )
+        if len(hw) != len(mapping):
+            raise ValueError("logical_to_hardware_map must be one-to-one")
+        n_ch = len(hw)
 
-        used_hw: set[int] = set()
-        for logical, hw_idx in mapping.items():
-            if hw_idx < 0 or hw_idx >= n_ch:
+        if len(self.channel_calibrations) == 0:
+            calibs: Tuple[Optional[AODSin2Calib], ...] = tuple(None for _ in range(n_ch))
+        else:
+            calibs = tuple(self.channel_calibrations)
+            if len(calibs) != n_ch:
                 raise ValueError(
-                    f"logical_to_hardware_map[{logical!r}]={hw_idx} out of range for N_ch={n_ch}"
+                    "channel_calibrations length must match the number of hardware channels; "
+                    f"got {len(calibs)} for N_ch={n_ch}"
                 )
-            if hw_idx in used_hw:
-                raise ValueError("logical_to_hardware_map must be one-to-one")
-            used_hw.add(hw_idx)
+        for i, calib in enumerate(calibs):
+            if calib is not None and not isinstance(calib, AODSin2Calib):
+                raise TypeError(
+                    "channel_calibrations must contain AODSin2Calib or None; "
+                    f"index {i} has {type(calib).__name__}"
+                )
 
-        object.__setattr__(self, "N_ch", n_ch)
         object.__setattr__(self, "logical_to_hardware_map", mapping)
         object.__setattr__(self, "channel_calibrations", calibs)
+
+    @property
+    def N_ch(self) -> int:
+        return len(self.channel_calibrations)
+
+    def hardware_channel(self, logical_channel: str) -> int:
+        key = str(logical_channel)
+        if key not in self.logical_to_hardware_map:
+            raise KeyError(
+                f"Unknown logical_channel {key!r}; available: {sorted(self.logical_to_hardware_map.keys())}"
+            )
+        return int(self.logical_to_hardware_map[key])
+
+    @classmethod
+    def identity(cls, logical_channels: Sequence[str]) -> "AWGPhysicalSetupInfo":
+        mapping = {str(lc): i for i, lc in enumerate(tuple(logical_channels))}
+        return cls(logical_to_hardware_map=mapping)
 
     def rf_amps(
         self,
@@ -270,50 +299,61 @@ class AWGCalibration(OpticalPowerToRFAmpCalib):
         logical_channel: str,
         xp: Any = np,
     ) -> Any:
-        key = str(logical_channel)
-        if key not in self.logical_to_hardware_map:
-            raise KeyError(
-                f"Unknown logical_channel {key!r}; available: {sorted(self.logical_to_hardware_map.keys())}"
-            )
-        hw_idx = int(self.logical_to_hardware_map[key])
-        return self.channel_calibrations[hw_idx].rf_amps(
+        hw_idx = self.hardware_channel(logical_channel)
+        calib = self.channel_calibrations[hw_idx]
+        if calib is None:
+            return xp.asarray(optical_powers, dtype=float)
+        return calib.rf_amps(
             freqs_hz,
             optical_powers,
-            logical_channel=key,
+            logical_channel=str(logical_channel),
             xp=xp,
         )
 
     def serialise(self) -> Dict[str, Any]:
         return {
-            "N_ch": int(self.N_ch),
             "logical_to_hardware_map": {
                 str(k): int(v) for k, v in self.logical_to_hardware_map.items()
             },
-            "channel_calibrations": [c.serialise() for c in self.channel_calibrations],
+            "channel_calibrations": [
+                None if c is None else c.serialise() for c in self.channel_calibrations
+            ],
         }
 
     @classmethod
-    def deserialise(cls, data: Mapping[str, Any]) -> "AWGCalibration":
-        raw = data.get("channel_calibrations")
-        if not isinstance(raw, list) or not raw:
-            raise ValueError("AWGCalibration requires a non-empty 'channel_calibrations' list")
+    def deserialise(cls, data: Mapping[str, Any]) -> "AWGPhysicalSetupInfo":
+        raw = data.get("channel_calibrations", [])
+        if not isinstance(raw, list):
+            raise ValueError("AWGPhysicalSetupInfo.channel_calibrations must be a list")
+        calibs: list[Optional[AODSin2Calib]] = []
+        for item in raw:
+            if item is None:
+                calibs.append(None)
+            elif isinstance(item, Mapping):
+                calibs.append(AODSin2Calib.deserialise(item))
+            else:
+                raise ValueError(
+                    "AWGPhysicalSetupInfo.channel_calibrations entries must be object or null"
+                )
         return cls(
-            N_ch=int(data["N_ch"]),
             logical_to_hardware_map={
                 str(k): int(v)
                 for k, v in dict(data.get("logical_to_hardware_map", {})).items()
             },
-            channel_calibrations=tuple(AODSin2Calib.deserialise(x) for x in raw),
+            channel_calibrations=tuple(calibs),
         )
 
     def to_file(self, path: str | Path) -> None:
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(self.serialise(), indent=2, sort_keys=True), encoding="utf-8")
+        out.write_text(
+            json.dumps(self.serialise(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "AWGCalibration":
+    def from_file(cls, path: str | Path) -> "AWGPhysicalSetupInfo":
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
-            raise ValueError("AWG calibration file must contain a JSON object")
+            raise ValueError("AWG physical setup file must contain a JSON object")
         return cls.deserialise(payload)

@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 from awgsegmentfactory import (
+    AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
     compile_sequence_program,
@@ -110,7 +111,7 @@ def main() -> None:
 
     sample_rate_hz = float(args.sample_rate_hz)
     pulse_s = float(args.pulse_us) * 1e-6
-    logical_channel_to_hardware_channel = {"H": 0}
+    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0})
 
     # Make the wait_trig segment as short as hardware allows by default:
     # 1ch min is 384 samples, so choose quantum_s such that quantum_samples == 384.
@@ -135,10 +136,10 @@ def main() -> None:
     full_scale_default = 32767
     compiled = compile_sequence_program(
         q,
+        physical_setup=physical_setup,
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
     )
 
     print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
@@ -184,10 +185,10 @@ def main() -> None:
             full_scale = int(card.max_sample_value()) - 1
             compiled = compile_sequence_program(
                 q,
+                physical_setup=physical_setup,
                 gain=1.0,
                 clip=0.9,
                 full_scale=full_scale,
-                logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             )
 
             sequence = spcm.Sequence(card)

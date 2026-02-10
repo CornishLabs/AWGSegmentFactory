@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory.calibration import OpticalPowerToRFAmpCalib
+from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 from awgsegmentfactory.intent_ir import InterpSpec
 from awgsegmentfactory.resolved_ir import (
     ResolvedIR,
@@ -23,20 +23,19 @@ def _empty_logical_channel_state() -> LogicalChannelState:
     )
 
 
-class _ScaleOpticalPowerToRFAmpCalib(OpticalPowerToRFAmpCalib):
-    def __init__(self, scale: float):
-        self._scale = float(scale)
+def _identity_setup(logical_channels: tuple[str, ...]) -> AWGPhysicalSetupInfo:
+    return AWGPhysicalSetupInfo.identity(logical_channels)
 
-    def rf_amps(
-        self,
-        freqs_hz,
-        optical_powers,
-        *,
-        logical_channel: str,
-        xp=np,
-    ):
-        _ = (freqs_hz, logical_channel)
-        return xp.asarray(optical_powers, dtype=float) * float(self._scale)
+
+def _unit_sin2_calib(*, amp_scale: float = 1.0) -> AODSin2Calib:
+    return AODSin2Calib(
+        g_poly_high_to_low=(1.0,),
+        v0_a_poly_high_to_low=(1.0,),
+        freq_min_hz=0.0,
+        freq_max_hz=1.0,
+        amp_scale=float(amp_scale),
+        min_v0_sq=1e-30,
+    )
 
 
 class TestSampleCompile(unittest.TestCase):
@@ -81,7 +80,14 @@ class TestSampleCompile(unittest.TestCase):
         )
         q = quantize_resolved_ir(ir)
         with self.assertRaises(ValueError):
-            compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000, output="cupy")
+            compile_sequence_program(
+                q,
+                physical_setup=_identity_setup(q.logical_channels),
+                gain=1.0,
+                clip=1.0,
+                full_scale=20000,
+                output="cupy",
+            )
 
     def test_phase_mode_continue_vs_manual(self) -> None:
         fs = 1000.0
@@ -153,12 +159,14 @@ class TestSampleCompile(unittest.TestCase):
         q_manual = quantize_resolved_ir(ir_manual)
         prog_continue = compile_sequence_program(
             q_continue,
+            physical_setup=_identity_setup(q_continue.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_manual = compile_sequence_program(
             q_manual,
+            physical_setup=_identity_setup(q_manual.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
@@ -264,12 +272,14 @@ class TestSampleCompile(unittest.TestCase):
         q_manual = quantize_resolved_ir(ir_manual)
         prog_continue = compile_sequence_program(
             q_continue,
+            physical_setup=_identity_setup(q_continue.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_manual = compile_sequence_program(
             q_manual,
+            physical_setup=_identity_setup(q_manual.logical_channels),
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
@@ -325,7 +335,13 @@ class TestSampleCompile(unittest.TestCase):
             segments=(seg0,),
         )
         q = quantize_resolved_ir(ir)
-        prog = compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000)
+        prog = compile_sequence_program(
+            q,
+            physical_setup=_identity_setup(q.logical_channels),
+            gain=1.0,
+            clip=1.0,
+            full_scale=20000,
+        )
         self.assertEqual(prog.segments[0].data_i16.shape, (4, n))
 
     def test_optical_power_calib_scales_synth_amplitudes(self) -> None:
@@ -355,18 +371,45 @@ class TestSampleCompile(unittest.TestCase):
         ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg0,))
         q = quantize_resolved_ir(ir)
         full_scale = 20000
-        prog_uncal = compile_sequence_program(
-            q, gain=1.0, clip=1.0, full_scale=full_scale
+        setup_uncal = AWGPhysicalSetupInfo(
+            logical_to_hardware_map={"H": 0},
+            channel_calibrations=(None,),
         )
-        prog_cal = compile_sequence_program(
+        calib = _unit_sin2_calib(amp_scale=2.0)
+        setup_cal = AWGPhysicalSetupInfo(
+            logical_to_hardware_map={"H": 0},
+            channel_calibrations=(calib,),
+        )
+        prog_uncal = compile_sequence_program(
             q,
+            physical_setup=setup_uncal,
             gain=1.0,
             clip=1.0,
             full_scale=full_scale,
-            optical_power_calib=_ScaleOpticalPowerToRFAmpCalib(2.0),
+        )
+        prog_cal = compile_sequence_program(
+            q,
+            physical_setup=setup_cal,
+            gain=1.0,
+            clip=1.0,
+            full_scale=full_scale,
         )
         self.assertEqual(int(prog_uncal.segments[0].data_i16[0, 0]), 2000)
-        self.assertEqual(int(prog_cal.segments[0].data_i16[0, 0]), 4000)
+        expected_rf = float(
+            np.asarray(
+                calib.rf_amps(
+                    np.array([10.0], dtype=float),
+                    np.array([0.1], dtype=float),
+                    logical_channel="H",
+                    xp=np,
+                ),
+                dtype=float,
+            )[0]
+        )
+        self.assertEqual(
+            int(prog_cal.segments[0].data_i16[0, 0]),
+            int(np.rint(expected_rf * float(full_scale))),
+        )
 
     def test_optical_power_calib_used_for_phase_optimisation(self) -> None:
         from unittest.mock import patch
@@ -412,12 +455,21 @@ class TestSampleCompile(unittest.TestCase):
             "awgsegmentfactory.synth_samples._optimise_phases_for_crest",
             side_effect=fake_opt,
         ):
+            calib = _unit_sin2_calib(amp_scale=3.0)
+            setup_cal = AWGPhysicalSetupInfo(
+                logical_to_hardware_map={"H": 0},
+                channel_calibrations=(calib,),
+            )
             compile_sequence_program(
                 q,
+                physical_setup=setup_cal,
                 gain=1.0,
                 clip=1.0,
                 full_scale=20000,
-                optical_power_calib=_ScaleOpticalPowerToRFAmpCalib(3.0),
             )
 
-        np.testing.assert_allclose(captured["amps"], np.array([0.3, 0.6], dtype=float))
+        expected_amps = np.asarray(
+            calib.rf_amps(st.freqs_hz, st.amps, logical_channel="H", xp=np),
+            dtype=float,
+        ).reshape(-1)
+        np.testing.assert_allclose(captured["amps"], expected_amps)

@@ -20,6 +20,7 @@ import io
 import pstats
 
 from awgsegmentfactory import AWGProgramBuilder
+from awgsegmentfactory.calibration import AWGPhysicalSetupInfo
 from awgsegmentfactory.debug import (
     benchmark_builder_pipeline,
     compile_builder_pipeline_timed,
@@ -46,7 +47,7 @@ def main() -> None:
     p.add_argument("--profile-top", type=int, default=30)
     args = p.parse_args()
 
-    mapping = {"H": 0, "V": 1}
+    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 
     if args.gpu:
         import cupy as cp  # type: ignore
@@ -59,7 +60,7 @@ def main() -> None:
     runs = benchmark_builder_pipeline(
         build_demo_builder,
         sample_rate_hz=args.sample_rate_hz,
-        logical_channel_to_hardware_channel=mapping,
+        physical_setup=physical_setup,
         iters=args.iters,
         warmup=args.warmup,
         gpu=args.gpu,
@@ -72,7 +73,7 @@ def main() -> None:
         _compiled, timing = compile_builder_pipeline_timed(
             build_demo_builder(),
             sample_rate_hz=args.sample_rate_hz,
-            logical_channel_to_hardware_channel=mapping,
+            physical_setup=physical_setup,
             gpu=args.gpu,
         )
         prof.disable()

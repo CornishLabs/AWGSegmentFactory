@@ -6,7 +6,7 @@ Model: sin2
 
 from __future__ import annotations
 
-from awgsegmentfactory.calibration import AODSin2Calib, AWGCalibration
+from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 
 # source: H='examples/calibrations/814_H_calFile_17.02.2022_0=0.txt'
 CALIB_814_CALFILE_17_02_2022_0_0_H = AODSin2Calib(
@@ -66,8 +66,7 @@ CALIB_814_CALFILE_17_02_2022_0_0_V = AODSin2Calib(
     y_eps=1e-06,
 )
 
-CALIB_814_CALFILE_17_02_2022_0_0 = AWGCalibration(
-    N_ch=2,
+CALIB_814_CALFILE_17_02_2022_0_0 = AWGPhysicalSetupInfo(
     logical_to_hardware_map={"H": 0, "V": 1},
     channel_calibrations=(CALIB_814_CALFILE_17_02_2022_0_0_H, CALIB_814_CALFILE_17_02_2022_0_0_V),
 )
@@ -130,7 +129,7 @@ AWG3_CALIBRATION_04_10_2024_98MHZ_118MHZ = AODSin2Calib(
     y_eps=1e-06,
 )
 
-CALIBS_BY_DATASET_KEY: dict[str, AODSin2Calib | AWGCalibration] = {
+CALIBS_BY_DATASET_KEY: dict[str, AODSin2Calib | AWGPhysicalSetupInfo] = {
     "814_calFile_17.02.2022_0=0": CALIB_814_CALFILE_17_02_2022_0_0,
     "AWG1_calibration_22_02_2023_90MHz_255MHz": AWG1_CALIBRATION_22_02_2023_90MHZ_255MHZ,
     "AWG3_calibration_04_10_2024_98MHz_118MHz": AWG3_CALIBRATION_04_10_2024_98MHZ_118MHZ,

@@ -6,14 +6,18 @@ This package implements a small pipeline:
 """
 
 from .builder import AWGProgramBuilder
-from .calibration import AODSin2Calib, AWGCalibration, LinearPositionToFreqCalib
+from .calibration import AODSin2Calib, AWGPhysicalSetupInfo, LinearPositionToFreqCalib
 from .intent_ir import IntentIR
 from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
 from .synth_samples import (
     CompiledSequenceProgram,
+    SynthesizedSequenceProgram,
     compile_sequence_program,
     compiled_sequence_program_to_numpy,
+    synthesize_sequence_program,
+    synthesized_sequence_program_to_numpy,
+    quantize_synthesized_program,
 )
 from .quantize import (
     QuantizedIR,
@@ -30,14 +34,18 @@ __all__ = [
     "AWGProgramBuilder",
     "LinearPositionToFreqCalib",
     "AODSin2Calib",
-    "AWGCalibration",
+    "AWGPhysicalSetupInfo",
     "IntentIR",
     "ResolvedIR",
     "resolve_intent_ir",
     "QuantizedIR",
     "CompiledSequenceProgram",
+    "SynthesizedSequenceProgram",
     "compile_sequence_program",
+    "synthesize_sequence_program",
+    "quantize_synthesized_program",
     "compiled_sequence_program_to_numpy",
+    "synthesized_sequence_program_to_numpy",
     "upload_sequence_program",
     "SegmentQuantizationInfo",
     "format_samples_time",

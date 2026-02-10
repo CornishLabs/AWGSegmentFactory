@@ -11,14 +11,11 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..calibration import OpticalPowerToRFAmpCalib
+from ..calibration import AWGPhysicalSetupInfo
 from ..resolved_ir import ResolvedIR
 from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
-from ..synth_samples import (
-    _interp_logical_channel_part as _interp_logical_channel_part,
-)
+from ..synth_samples import interp_logical_channel_part
 from ..quantize import QuantizedIR, quantize_resolved_ir
-from ..types import ChannelMap
 
 
 @dataclass(frozen=True)
@@ -105,7 +102,7 @@ def unroll_compiled_sequence_for_debug(
     - If `include_wrap_preview=True`, appends the entry step once so the final
       wrap-around boundary is visible.
     """
-    n_channels = max(compiled.logical_channel_to_hardware_channel.values()) + 1
+    n_channels = int(compiled.physical_setup.N_ch)
     instances_spec = _iter_instances_for_debug(
         compiled,
         wait_trig_loops=wait_trig_loops,
@@ -145,13 +142,12 @@ def unroll_compiled_sequence_for_debug(
 def sequence_samples_debug(
     program: ResolvedIR | QuantizedIR | CompiledSequenceProgram,
     *,
-    logical_channel_to_hardware_channel: Optional[ChannelMap] = None,
+    physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     wait_trig_loops: int = 3,
     include_wrap_preview: bool = True,
     gain: float = 1.0,
     clip: float = 0.9,
     full_scale: int = 32767,
-    optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     channels: Optional[Sequence[int]] = None,
     window_samples: Optional[int] = None,
     show_slider: Optional[bool] = None,
@@ -185,6 +181,9 @@ def sequence_samples_debug(
       use the Play button.
 
     Tip (Jupyter): `%matplotlib widget` for a nicer zoom/pan UI.
+
+    If `program` is `ResolvedIR`/`QuantizedIR` and `physical_setup` is omitted,
+    an identity mapping is used (`logical_channels` in order -> hardware 0..N-1).
     """
     try:
         import matplotlib.pyplot as plt
@@ -203,26 +202,30 @@ def sequence_samples_debug(
         compiled = program
     elif isinstance(program, QuantizedIR):
         q_ir = program.resolved_ir
+        setup = physical_setup
+        if setup is None:
+            setup = AWGPhysicalSetupInfo.identity(q_ir.logical_channels)
         compiled = compile_sequence_program(
             program,
+            physical_setup=setup,
             gain=gain,
             clip=clip,
             full_scale=full_scale,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-            optical_power_calib=optical_power_calib,
         )
     else:
         quantized = quantize_resolved_ir(
             program,
         )
         q_ir = quantized.resolved_ir
+        setup = physical_setup
+        if setup is None:
+            setup = AWGPhysicalSetupInfo.identity(q_ir.logical_channels)
         compiled = compile_sequence_program(
             quantized,
+            physical_setup=setup,
             gain=gain,
             clip=clip,
             full_scale=full_scale,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
-            optical_power_calib=optical_power_calib,
         )
     need_params = bool(show_param_traces) or bool(show_spot_grid)
     if need_params and q_ir is None:
@@ -251,7 +254,7 @@ def sequence_samples_debug(
         raise ValueError("max_points_param must be > 2")
 
     if channels is None:
-        channels = sorted(set(compiled.logical_channel_to_hardware_channel.values()))
+        channels = sorted(set(compiled.physical_setup.logical_to_hardware_map.values()))
     channels = [int(c) for c in channels]
     if not channels:
         raise ValueError("channels must be non-empty")
@@ -260,7 +263,7 @@ def sequence_samples_debug(
 
     # Invert logical_channel->hardware_channel mapping for labels (best-effort).
     hw_ch_to_logical_channels: Dict[int, List[str]] = {}
-    for logical_channel, hw_ch in compiled.logical_channel_to_hardware_channel.items():
+    for logical_channel, hw_ch in compiled.physical_setup.logical_to_hardware_map.items():
         hw_ch_to_logical_channels.setdefault(int(hw_ch), []).append(str(logical_channel))
 
     if param_channels is None:
@@ -452,7 +455,7 @@ def sequence_samples_debug(
                 pp = part.logical_channels[logical_channel]
                 if part.n_samples <= 0:
                     continue
-                f_part, a_part = _interp_logical_channel_part(
+                f_part, a_part = interp_logical_channel_part(
                     pp, n_samples=part.n_samples, sample_rate_hz=q_ir.sample_rate_hz
                 )
                 f_part = f_part.astype(np.float32, copy=False)

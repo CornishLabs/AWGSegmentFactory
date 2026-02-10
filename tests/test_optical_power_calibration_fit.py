@@ -6,7 +6,6 @@ from awgsegmentfactory.calibration import AODSin2Calib
 from awgsegmentfactory.optical_power_calibration_fit import (
     OpticalPowerCalCurve,
     aod_sin2_calib_to_python,
-    build_aod_sin2_calib_from_fits,
     fit_sin2_poly_model,
     fit_sin2_poly_model_by_logical_channel,
     suggest_amp_scale_from_curves,
@@ -40,7 +39,7 @@ class TestOpticalPowerCalibrationFit(unittest.TestCase):
         self.assertAlmostEqual(g_est, g_true, places=9)
         self.assertAlmostEqual(v0_est, v0_true, places=6)
 
-    def test_multi_channel_sin2_bundle_and_python_snippet(self) -> None:
+    def test_per_channel_fit_and_python_snippet(self) -> None:
         freqs_hz = np.array([90e6, 100e6, 110e6], dtype=float)
         amps_mV = np.linspace(0.0, 150.0, 40, dtype=float)
         min_v0_sq = 1e-12
@@ -64,13 +63,24 @@ class TestOpticalPowerCalibrationFit(unittest.TestCase):
             maxiter=120,
         )
         amp_scale = suggest_amp_scale_from_curves(curves_by_lc)
-        calib = build_aod_sin2_calib_from_fits(fits_by_lc, amp_scale=float(amp_scale))
-        self.assertIsInstance(calib, AODSin2Calib)
-        self.assertEqual(set(calib.g_poly_by_logical_channel.keys()), {"H", "V"})
-        self.assertEqual(set(calib.v0_a_poly_by_logical_channel.keys()), {"H", "V"})
+        cal_h = fits_by_lc["H"].to_aod_sin2_calib(
+            amp_scale=float(amp_scale),
+            freq_min_hz=float(np.min(freqs_hz)),
+            freq_max_hz=float(np.max(freqs_hz)),
+            traceability_string="H curve set",
+        )
+        cal_v = fits_by_lc["V"].to_aod_sin2_calib(
+            amp_scale=float(amp_scale),
+            freq_min_hz=float(np.min(freqs_hz)),
+            freq_max_hz=float(np.max(freqs_hz)),
+            traceability_string="V curve set",
+        )
+        self.assertIsInstance(cal_h, AODSin2Calib)
+        self.assertIsInstance(cal_v, AODSin2Calib)
+        self.assertGreaterEqual(int(cal_h.best_freq_hz), int(np.min(freqs_hz)))
+        self.assertLessEqual(int(cal_h.best_freq_hz), int(np.max(freqs_hz)))
 
-        code = aod_sin2_calib_to_python(calib, var_name="CAL")
-        self.assertIn("CAL = AODSin2Calib(", code)
-        self.assertIn("'H':", code)
-        self.assertIn("'V':", code)
-
+        code = aod_sin2_calib_to_python(cal_h, var_name="CAL_H")
+        self.assertIn("CAL_H = AODSin2Calib(", code)
+        self.assertIn("g_poly_high_to_low=", code)
+        self.assertIn("v0_a_poly_high_to_low=", code)

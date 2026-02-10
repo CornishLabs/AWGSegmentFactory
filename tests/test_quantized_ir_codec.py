@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder, compile_sequence_program, quantize_resolved_ir
-from awgsegmentfactory.calibration import AODSin2Calib
+from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 from awgsegmentfactory.quantize import QuantizedIR
 
 
@@ -39,10 +39,10 @@ class TestQuantizedIRCodec(unittest.TestCase):
     def test_encode_decode_roundtrip_preserves_samples(self) -> None:
         fs = 4.0  # small so we get a tiny IR quickly; quantize will enforce min segment size.
         calib = AODSin2Calib(
-            g_poly_by_logical_channel={"*": (1.0,)},
-            v0_a_poly_by_logical_channel={"*": (1.0,)},
-            freq_mid_hz=100.0,
-            freq_halfspan_hz=1.0,
+            g_poly_high_to_low=(1.0,),
+            v0_a_poly_high_to_low=(1.0,),
+            freq_min_hz=0.0,
+            freq_max_hz=1.0,
             amp_scale=1.0,
         )
 
@@ -64,20 +64,24 @@ class TestQuantizedIRCodec(unittest.TestCase):
         self.assertNotIn("calibrations", encoded.get("resolved_ir", {}))
 
         q2 = QuantizedIR.decode(encoded)
+        physical_setup = AWGPhysicalSetupInfo(
+            logical_to_hardware_map={"H": 0},
+            channel_calibrations=(calib,),
+        )
 
         c0 = compile_sequence_program(
             q,
+            physical_setup=physical_setup,
             gain=1.0,
             clip=0.9,
             full_scale=32767,
-            optical_power_calib=calib,
         )
         c1 = compile_sequence_program(
             q2,
+            physical_setup=physical_setup,
             gain=1.0,
             clip=0.9,
             full_scale=32767,
-            optical_power_calib=calib,
         )
 
         self.assertEqual(c0.steps, c1.steps)

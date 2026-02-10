@@ -62,18 +62,23 @@ print(ir.duration_s, "seconds")
 ### 2) Compile to per-segment int16 samples
 
 ```python
-from awgsegmentfactory import compile_sequence_program, quantize_resolved_ir
+from awgsegmentfactory import (
+    AWGPhysicalSetupInfo,
+    compile_sequence_program,
+    quantize_resolved_ir,
+)
 
 quantized = quantize_resolved_ir(
     ir,
 )
+physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 
 compiled = compile_sequence_program(
     quantized,
+    physical_setup=physical_setup,
     gain=1.0,
     clip=0.9,
     full_scale=32767,
-    logical_channel_to_hardware_channel={"H": 0, "V": 1},
 )
 
 print("segments:", len(compiled.segments))
@@ -88,6 +93,10 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
 - `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
   - To convert back to NumPy, use `compiled_sequence_program_to_numpy(...)`.
+
+If you want explicit control of stages, you can use:
+- `synthesize_sequence_program(...)` (float synthesis; optional GPU)
+- `quantize_synthesized_program(...)` (gain/clip/full-scale to int16)
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -122,9 +131,11 @@ The library function `upload_sequence_program(...)` is a placeholder for a futur
 
 ## Optical-power calibration (optional)
 
-If you pass an `OpticalPowerToRFAmpCalib` calibration object to `compile_sequence_program(...)`, then `amps` in the
-IR are treated as *desired optical power* (arbitrary units), and sample synthesis converts `(freq, optical_power)`
-to the RF synthesis amplitudes actually used for sample generation.
+Optical calibration is attached through `AWGPhysicalSetupInfo`.
+
+When a hardware channel has an `AODSin2Calib`, `amps` in the IR are interpreted as
+desired optical power (arb), and synthesis converts `(freq, optical_power)` to RF
+amplitude before waveform generation.
 
 ### Calibration concepts
 
@@ -154,14 +165,15 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
   - single-channel model + metadata.
   - serializable via `serialise` / `deserialise`.
 
-- `AWGCalibration`
-  - container passed to `compile_sequence_program(..., optical_power_calib=...)`.
+- `AWGPhysicalSetupInfo`
+  - container passed to `compile_sequence_program(..., physical_setup=...)`.
   - serializable via `serialise` / `deserialise` and `to_file` / `from_file`.
   - fields:
-    - `N_ch: int`
     - `logical_to_hardware_map: Dict[str, int]`
-    - `channel_calibrations: Tuple[AODSin2Calib, ...]`
+    - `channel_calibrations: Tuple[Optional[AODSin2Calib], ...]`
+    - derived `N_ch` property
   - routes each logical channel in the IR to the correct physical-channel calibration.
+  - if a channel calibration is `None`, that channel uses raw IR amplitudes as RF amplitudes.
 
 ### Practical workflow
 
@@ -174,13 +186,12 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
    - pass one `--input-data-file` per hardware channel.
    - optionally set mapping with repeated `--logical-to-hardware-map`, e.g. `H=0`, `V=1`.
    - optionally set provenance with repeated `--traceability-string`.
-3) Save JSON output (`--write-out`) and load as `AWGCalibration.from_file(...)`.
+3) Save JSON output (`--write-out`) and load as `AWGPhysicalSetupInfo.from_file(...)`.
 4) Compile with calibration:
-   - `compile_sequence_program(..., optical_power_calib=awg_calibration)`.
+   - `compile_sequence_program(..., physical_setup=awg_physical_setup)`.
 
 Examples:
-- `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
-- `examples/fit_optical_power_calibration.py` (fit and inspect generated `AODSin2Calib`/`AWGCalibration`)
+- `examples/fit_optical_power_calibration.py` (fit and inspect generated `AODSin2Calib`/`AWGPhysicalSetupInfo`)
 - `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, compile with calibration, and debug samples)
 
 ## Compilation stages (mental model)
@@ -198,7 +209,7 @@ flowchart LR
     R -- quantize_resolved_ir --> Q
     Q -- compile_sequence_program --> C
 
-    CAL[Calibrations: AODSin2Calib / AWGCalibration] --> C
+    CAL[Calibrations: AODSin2Calib / AWGPhysicalSetupInfo] --> C
 
     R -- to_timeline --> TL[ResolvedTimeline]
     Q -- debug --> DBG[sequence_samples_debug]
@@ -214,8 +225,9 @@ flowchart LR
    - `quantize_resolved_ir(resolved)` returns a `QuantizedIR`:
      a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
-   - `compile_sequence_program(quantized, logical_channel_to_hardware_channel=..., ...)` synthesises per-segment int16 waveforms plus a sequence
-     step table (`CompiledSequenceProgram`).
+   - `synthesize_sequence_program(quantized, physical_setup=...)` builds float per-segment waveforms.
+   - `quantize_synthesized_program(...)` applies gain/clip/full-scale and produces int16 buffers.
+   - `compile_sequence_program(...)` is a convenience wrapper for both steps.
 
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/resolved_timeline.py`) and `ResolvedIR.to_timeline()`
@@ -246,7 +258,8 @@ For plotting/state queries there is also a debug view:
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
 - `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODSin2Calib`) are consumed during
-  `compile_sequence_program(..., optical_power_calib=...)` to convert `(freq, optical_power)` → RF synthesis amplitudes.
+  `synthesize_sequence_program(..., physical_setup=...)` / `compile_sequence_program(...)`
+  to convert `(freq, optical_power)` → RF synthesis amplitudes.
 
 ## Roadmap
 

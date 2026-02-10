@@ -6,7 +6,7 @@ This demonstrates an end-to-end flow:
 2) Fit a smooth, monotone saturation model:
      DE(freq, a_mV) ≈ g(freq) * sin^2((π/2) * a_mV / v0(freq))
 3) Build an `AODSin2Calib` from the fitted polynomials
-4) Pass it to `compile_sequence_program(..., optical_power_calib=...)` so `amps` in
+4) Attach it in `AWGPhysicalSetupInfo(channel_calibrations=...)` so `amps` in
    the IR represent *optical power* (or DE proxy), while sample synthesis uses
    calibrated RF amplitudes.
 5) Visualize the compiled samples + segment boundaries.
@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder, ResolvedIR
-from awgsegmentfactory.calibration import AODSin2Calib
+from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 from awgsegmentfactory.debug import sequence_samples_debug
 from awgsegmentfactory.optical_power_calibration_fit import (
     Sin2PolyFitResult,
@@ -145,11 +145,14 @@ def main() -> None:
     # Use a realistic Spectrum-like sample rate, but keep segment durations short.
     fs = 625e6
     ir = _build_demo_program(sample_rate_hz=fs, fit=fit)
+    physical_setup = AWGPhysicalSetupInfo(
+        logical_to_hardware_map={"H": 0},
+        channel_calibrations=(calib,),
+    )
 
     fig, axs, slider = sequence_samples_debug(
         ir,
-        logical_channel_to_hardware_channel={"H": 0},
-        optical_power_calib=calib,
+        physical_setup=physical_setup,
         wait_trig_loops=3,
         include_wrap_preview=True,
         window_samples=None,

@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 
 from awgsegmentfactory import (
+    AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
     compile_sequence_program,
@@ -97,7 +98,7 @@ def _setup_spcm_sequence_from_compiled(sequence, compiled) -> None:
 
 def main() -> None:
     sample_rate_hz = 625e6
-    logical_channel_to_hardware_channel = {"H": 0, "V": 1}
+    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 
     ir = _build_demo_program(sample_rate_hz=sample_rate_hz)
     q = quantize_resolved_ir(
@@ -109,10 +110,10 @@ def main() -> None:
     full_scale_default = 32767
     compiled = compile_sequence_program(
         q,
+        physical_setup=physical_setup,
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
     )
 
     print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
@@ -157,10 +158,10 @@ def main() -> None:
             full_scale = int(card.max_sample_value()) - 1
             compiled = compile_sequence_program(
                 q,
+                physical_setup=physical_setup,
                 gain=1.0,
                 clip=0.9,
                 full_scale=full_scale,
-                logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             )
 
             sequence = spcm.Sequence(card)
