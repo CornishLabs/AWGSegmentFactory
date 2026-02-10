@@ -51,8 +51,9 @@ ir = (
     AWGProgramBuilder()
     .logical_channel("H")
     .logical_channel("V")
-    .define("init_H", logical_channel="H", freqs=[90e6], amps=[0.3], phases="auto")
-    .define("init_V", logical_channel="V", freqs=[100e6], amps=[0.3], phases="auto")
+    # Uncalibrated channels interpret amps as RF amplitudes in mV.
+    .define("init_H", logical_channel="H", freqs=[90e6], amps=[300.0], phases="auto")
+    .define("init_V", logical_channel="V", freqs=[100e6], amps=[300.0], phases="auto")
     .segment("wait", mode="wait_trig")     # loops until trigger
         .tones("H").use_def("init_H")
         .tones("V").use_def("init_V")
@@ -190,6 +191,7 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
 - `full_scale_mv` in `compile_sequence_program(...)` and
   `quantise_and_normalise_voltage_for_awg(...)` is the AWG output voltage (mV)
   that maps to `full_scale`.
+- `clip` defaults to `1.0` in both APIs.
 - If your card is configured to `card_max_mV`, use:
   - `full_scale_mv = card_max_mV`
 - This convention works for both:
