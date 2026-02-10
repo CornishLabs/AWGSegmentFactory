@@ -687,7 +687,29 @@ def compile_sequence_program(
 ) -> CompiledSequenceProgram:
     """
     Convenience wrapper: synthesize float buffers then quantize to int16.
+
+    Performance behavior:
+    - `gpu=False`: CPU synthesis + CPU quantization.
+    - `gpu=True, output="cupy"`: GPU synthesis + GPU quantization, return CuPy int16.
+    - `gpu=True, output="numpy"` (default): run synthesis+quantization on GPU, then
+      transfer final int16 buffers to NumPy. This avoids transferring intermediate
+      float buffers and is typically the fastest path for NumPy output.
     """
+    if gpu and output == "numpy":
+        synthesized_gpu = synthesize_sequence_program(
+            quantized,
+            physical_setup=physical_setup,
+            gpu=True,
+            output="cupy",
+        )
+        compiled_gpu = quantize_synthesized_program(
+            synthesized_gpu,
+            gain=gain,
+            clip=clip,
+            full_scale=full_scale,
+        )
+        return compiled_sequence_program_to_numpy(compiled_gpu)
+
     synthesized = synthesize_sequence_program(
         quantized,
         physical_setup=physical_setup,
