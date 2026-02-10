@@ -375,7 +375,6 @@ class Sin2PolyFitResult:
     def to_aod_sin2_calib(
         self,
         *,
-        amp_scale: float,
         min_g: float = 1e-12,
         y_eps: float = 1e-6,
         freq_min_hz: float | None = None,
@@ -397,7 +396,6 @@ class Sin2PolyFitResult:
             freq_min_hz=freq_min,
             freq_max_hz=freq_max,
             traceability_string=str(traceability_string),
-            amp_scale=float(amp_scale),
             min_g=float(min_g),
             min_v0_sq=float(self.min_v0_sq_mV2),
             y_eps=float(y_eps),
@@ -441,18 +439,6 @@ def _fit_freq_norm(curves: Sequence[OpticalPowerCalCurve]) -> tuple[float, float
     if not np.isfinite(halfspan) or halfspan <= 0:
         raise ValueError("Invalid frequency span for normalization")
     return mid, halfspan
-
-
-def _flatten_curves(
-    curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]] | Sequence[OpticalPowerCalCurve],
-) -> list[OpticalPowerCalCurve]:
-    curves: list[OpticalPowerCalCurve] = []
-    if isinstance(curves_by_logical_channel, Mapping):
-        for vv in curves_by_logical_channel.values():
-            curves.extend(list(vv))
-    else:
-        curves.extend(list(curves_by_logical_channel))
-    return curves
 
 
 def fit_sin2_poly_model(
@@ -629,22 +615,6 @@ def fit_sin2_poly_model(
     )
 
 
-def suggest_amp_scale_from_curves(
-    curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]] | Sequence[OpticalPowerCalCurve],
-) -> float:
-    """Suggest an `amp_scale` that maps the max RF amplitude (mV) to ~1.0."""
-    curves = _flatten_curves(curves_by_logical_channel)
-    if not curves:
-        raise ValueError("No curves provided")
-    a_max = 0.0
-    for c in curves:
-        if c.rf_amps_mV.size:
-            a_max = max(a_max, float(np.max(np.asarray(c.rf_amps_mV, dtype=float))))
-    if not np.isfinite(a_max) or a_max <= 0:
-        raise ValueError("Cannot determine max RF amplitude from curves")
-    return 1.0 / float(a_max)
-
-
 def fit_sin2_poly_model_by_logical_channel(
     curves_by_logical_channel: Mapping[str, Sequence[OpticalPowerCalCurve]],
     *,
@@ -709,7 +679,6 @@ def fit_sin2_poly_model_by_logical_channel(
 def build_aod_sin2_calib_from_fit(
     fit: Sin2PolyFitResult,
     *,
-    amp_scale: float,
     min_g: float = 1e-12,
     y_eps: float = 1e-6,
     freq_min_hz: float | None = None,
@@ -731,7 +700,6 @@ def build_aod_sin2_calib_from_fit(
         freq_min_hz=freq_min,
         freq_max_hz=freq_max,
         traceability_string=str(traceability_string),
-        amp_scale=float(amp_scale),
         min_g=float(min_g),
         min_v0_sq=float(fit.min_v0_sq_mV2),
         y_eps=float(y_eps),
@@ -756,7 +724,6 @@ def aod_sin2_calib_to_python(
             f"    freq_min_hz={float(calib.freq_min_hz):.16g},",
             f"    freq_max_hz={float(calib.freq_max_hz):.16g},",
             f"    traceability_string={calib.traceability_string!r},",
-            f"    amp_scale={float(calib.amp_scale):.16g},",
             f"    min_g={float(calib.min_g):.16g},",
             f"    min_v0_sq={float(calib.min_v0_sq):.16g},",
             f"    y_eps={float(calib.y_eps):.16g},",

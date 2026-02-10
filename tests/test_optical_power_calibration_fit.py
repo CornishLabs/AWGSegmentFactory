@@ -8,7 +8,6 @@ from awgsegmentfactory.optical_power_calibration_fit import (
     aod_sin2_calib_to_python,
     fit_sin2_poly_model,
     fit_sin2_poly_model_by_logical_channel,
-    suggest_amp_scale_from_curves,
 )
 
 
@@ -62,15 +61,12 @@ class TestOpticalPowerCalibrationFit(unittest.TestCase):
             min_v0_sq_mV2=min_v0_sq,
             maxiter=120,
         )
-        amp_scale = suggest_amp_scale_from_curves(curves_by_lc)
         cal_h = fits_by_lc["H"].to_aod_sin2_calib(
-            amp_scale=float(amp_scale),
             freq_min_hz=float(np.min(freqs_hz)),
             freq_max_hz=float(np.max(freqs_hz)),
             traceability_string="H curve set",
         )
         cal_v = fits_by_lc["V"].to_aod_sin2_calib(
-            amp_scale=float(amp_scale),
             freq_min_hz=float(np.min(freqs_hz)),
             freq_max_hz=float(np.max(freqs_hz)),
             traceability_string="V curve set",

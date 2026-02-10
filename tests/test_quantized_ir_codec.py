@@ -43,7 +43,6 @@ class TestQuantizedIRCodec(unittest.TestCase):
             v0_a_poly_high_to_low=(1.0,),
             freq_min_hz=0.0,
             freq_max_hz=1.0,
-            amp_scale=1.0,
         )
 
         b = (

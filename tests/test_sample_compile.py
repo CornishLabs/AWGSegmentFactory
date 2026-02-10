@@ -27,13 +27,12 @@ def _identity_setup(logical_channels: tuple[str, ...]) -> AWGPhysicalSetupInfo:
     return AWGPhysicalSetupInfo.identity(logical_channels)
 
 
-def _unit_sin2_calib(*, amp_scale: float = 1.0) -> AODSin2Calib:
+def _unit_sin2_calib() -> AODSin2Calib:
     return AODSin2Calib(
         g_poly_high_to_low=(1.0,),
         v0_a_poly_high_to_low=(1.0,),
         freq_min_hz=0.0,
         freq_max_hz=1.0,
-        amp_scale=float(amp_scale),
         min_v0_sq=1e-30,
     )
 
@@ -375,7 +374,7 @@ class TestSampleCompile(unittest.TestCase):
             logical_to_hardware_map={"H": 0},
             channel_calibrations=(None,),
         )
-        calib = _unit_sin2_calib(amp_scale=2.0)
+        calib = _unit_sin2_calib()
         setup_cal = AWGPhysicalSetupInfo(
             logical_to_hardware_map={"H": 0},
             channel_calibrations=(calib,),
@@ -455,7 +454,7 @@ class TestSampleCompile(unittest.TestCase):
             "awgsegmentfactory.synth_samples._optimise_phases_for_crest",
             side_effect=fake_opt,
         ):
-            calib = _unit_sin2_calib(amp_scale=3.0)
+            calib = _unit_sin2_calib()
             setup_cal = AWGPhysicalSetupInfo(
                 logical_to_hardware_map={"H": 0},
                 channel_calibrations=(calib,),

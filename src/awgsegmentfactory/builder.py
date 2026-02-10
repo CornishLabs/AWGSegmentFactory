@@ -84,7 +84,12 @@ class LogicalChannelView:
         phase: float | Literal["auto"] = "auto",
         at: Optional[int] = None,
     ) -> "LogicalChannelView":
-        """Append an `AddToneOp` (instantaneous tone-bank edit) for this logical channel."""
+        """
+        Append an `AddToneOp` (instantaneous tone-bank edit) for this logical channel.
+
+        `amp` follows the same convention as `define(..., amps=...)`:
+        RF amplitude (mV) for uncalibrated channels, optical power (arb) for calibrated ones.
+        """
         ph = 0.0 if phase == "auto" else float(phase)
         self._b._append(
             AddToneOp(
@@ -143,7 +148,12 @@ class LogicalChannelView:
         tau: Optional[float] = None,
         idxs: Optional[Sequence[int]] = None,
     ) -> "LogicalChannelView":
-        """Append a `RampAmpToOp` (amplitude ramp over time) for this logical channel."""
+        """
+        Append a `RampAmpToOp` (amplitude ramp over time) for this logical channel.
+
+        `amps` follows the same convention as `define(..., amps=...)`:
+        RF amplitude (mV) for uncalibrated channels, optical power (arb) for calibrated ones.
+        """
         if kind not in ("linear", "exp", "min_jerk", "geo_ramp", "adiabatic_ramp"):
             raise ValueError(
                 "ramp_amp_to: kind must be one of "
@@ -285,6 +295,9 @@ class AWGProgramBuilder:
       tone-bank an operation applies to; it is not a hardware channel.
     - The timeline is continuous: logical-channel state carries across segment
       boundaries; `time=0` ops update state without advancing time.
+    - `amps` units are interpreted later at synthesis time by `AWGPhysicalSetupInfo`:
+      with no per-channel calibration they are treated as RF amplitudes (mV by convention);
+      with `AODSin2Calib` they are treated as optical power (arb, same units as the fit data).
     """
 
     def __init__(self):
@@ -317,6 +330,8 @@ class AWGProgramBuilder:
         - `phases="auto"` currently means all phases are set to 0.
         - These phases are used directly when a segment uses `phase_mode="manual"`.
           Other phase modes may override start phases during compilation.
+        - `amps` units are context-dependent and resolved at synthesis time:
+          RF amplitude (mV) for uncalibrated channels, optical power (arb) for calibrated ones.
         """
         if logical_channel not in self._logical_channels:
             raise ValueError(

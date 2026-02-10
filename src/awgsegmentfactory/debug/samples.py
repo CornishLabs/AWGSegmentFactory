@@ -184,6 +184,7 @@ def sequence_samples_debug(
 
     If `program` is `ResolvedIR`/`QuantizedIR` and `physical_setup` is omitted,
     an identity mapping is used (`logical_channels` in order -> hardware 0..N-1).
+    If synthesized amplitudes are in mV, use `gain = 1.0 / card_max_mV`.
     """
     try:
         import matplotlib.pyplot as plt

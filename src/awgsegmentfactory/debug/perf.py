@@ -43,6 +43,7 @@ def compile_builder_pipeline_timed(
     returning both the compiled program and per-stage wall-clock timings.
 
     If `physical_setup` is omitted, an identity logical->hardware mapping is used.
+    If synthesized amplitudes are in mV, use `gain = 1.0 / card_max_mV`.
     """
     t0 = perf_counter()
     intent = builder.build_intent_ir()

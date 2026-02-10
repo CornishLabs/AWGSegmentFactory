@@ -30,7 +30,6 @@ from awgsegmentfactory.optical_power_calibration_fit import (
     Sin2PolyFitResult,
     curves_from_de_rf_calibration_dict,
     fit_sin2_poly_model,
-    suggest_amp_scale_from_curves,
 )
 
 
@@ -56,9 +55,6 @@ def _fit_calibration_file_to_sin2(
 ) -> tuple[AODSin2Calib, Sin2PolyFitResult, float]:
     """
     Returns (calib, fit, rf_amp_max_mV).
-
-    `rf_amp_max_mV` is useful for choosing a sensible `amp_scale` so the returned RF
-    amplitudes land in a comfortable [0,1] AWG amplitude range.
     """
     cal = _load_json(path)
     de_rf = cal.get("DE_RF_calibration")
@@ -70,11 +66,12 @@ def _fit_calibration_file_to_sin2(
         raise ValueError("No usable calibration curves found in DE_RF_calibration")
     fit = fit_sin2_poly_model(curves, degree_g=6, degree_v0=6)
 
-    # Choose an amp_scale that maps ~max RF amplitude (mV) to ~1.0 (AWG units).
-    amp_scale = suggest_amp_scale_from_curves(curves)
-    rf_amp_max_mV = 1.0 / float(amp_scale)
-
-    calib = fit.to_aod_sin2_calib(amp_scale=float(amp_scale))
+    rf_amp_max_mV = max(
+        float(np.max(np.asarray(c.rf_amps_mV, dtype=float)))
+        for c in curves
+        if np.asarray(c.rf_amps_mV, dtype=float).size > 0
+    )
+    calib = fit.to_aod_sin2_calib()
     return calib, fit, rf_amp_max_mV
 
 
@@ -140,7 +137,7 @@ def main() -> None:
     print("--- AODSin2Calib (from DE file fit) ---")
     print("file:", cal_path.name)
     print("fit rmse:", float(fit.rmse))
-    print("rf_amp_max_mV:", rf_amp_max_mV, "-> amp_scale:", float(calib.amp_scale))
+    print("rf_amp_max_mV in data:", rf_amp_max_mV)
 
     # Use a realistic Spectrum-like sample rate, but keep segment durations short.
     fs = 625e6

@@ -24,7 +24,6 @@ class TestAODSin2Calib(unittest.TestCase):
             v0_a_poly_high_to_low=(1.0,),
             freq_min_hz=0.0,
             freq_max_hz=1.0,
-            amp_scale=1.0,
             min_g=1e-12,
             min_v0_sq=1e-30,
             y_eps=1e-6,
@@ -68,7 +67,6 @@ class TestAODSin2Calib(unittest.TestCase):
             v0_a_poly_high_to_low=(1.0,),
             freq_min_hz=0.0,
             freq_max_hz=1.0,
-            amp_scale=1.0,
             min_v0_sq=1e-30,
         )
 

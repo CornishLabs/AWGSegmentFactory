@@ -51,7 +51,6 @@ from awgsegmentfactory.optical_power_calibration_fit import (
     curves_from_point_cloud,
     fit_sin2_poly_model_by_logical_channel,
     regular_grid_from_curves,
-    suggest_amp_scale_from_curves,
 )
 
 
@@ -963,7 +962,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         degree_v0=6,
         shared_freq_norm=True,
     )
-    amp_scale = suggest_amp_scale_from_curves(curves_by_channel)
 
     channel_calibrations: list = []
     for idx, key in enumerate(channel_keys):
@@ -973,7 +971,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise ValueError(f"No frequency data for {key}")
         channel_calibrations.append(
             fits_by_lc[key].to_aod_sin2_calib(
-                amp_scale=float(amp_scale),
                 freq_min_hz=float(np.min(freqs_hz)),
                 freq_max_hz=float(np.max(freqs_hz)),
                 traceability_string=str(traceability_strings[idx]),
@@ -991,7 +988,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     print("logical_to_hardware_map:", dict(physical_setup.logical_to_hardware_map))
     print("freq_mid_hz:", freq_mid_hz)
     print("freq_halfspan_hz:", freq_halfspan_hz)
-    print("amp_scale:", float(amp_scale))
     for idx, key in enumerate(channel_keys):
         fit = fits_by_lc[key]
         cal = channel_calibrations[idx]

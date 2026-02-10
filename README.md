@@ -77,11 +77,12 @@ quantized = quantize_resolved_ir(
     ir,
 )
 physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
+card_max_mV = 450.0  # match your AWG channel amplitude setting
 
 compiled = compile_sequence_program(
     quantized,
     physical_setup=physical_setup,
-    gain=1.0,
+    gain=1.0 / card_max_mV,
     clip=0.9,
     full_scale=32767,
 )
@@ -150,7 +151,8 @@ amplitude before waveform generation.
 `optical_power(freq, rf_amp_mV) ≈ g(freq) * sin^2((π/2) * rf_amp_mV / v0(freq))`
 
 - `g(freq)`: maximum reachable optical power (arb) at each frequency.
-- `v0(freq)`: RF-amplitude scale (mV) controlling where saturation occurs.
+- `v0(freq)`: RF-amplitude scale (mV) controlling where saturation occurs
+  (it is a function of frequency, not a frequency itself).
 - Inversion is used at compile time:
   desired optical power -> required RF amplitude.
 - Behavior at limits:
@@ -180,6 +182,19 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
     - derived `N_ch` property
   - routes each logical channel in the IR to the correct physical-channel calibration.
   - if a channel calibration is `None`, that channel uses raw IR amplitudes as RF amplitudes.
+    By convention these are RF amplitudes in mV.
+  - if a channel has `AODSin2Calib`, that channel uses IR amplitudes as optical power (arb)
+    and converts to RF amplitudes (mV) during synthesis.
+
+### Gain / normalization
+
+- `gain` in `compile_sequence_program(...)` and `quantize_synthesized_program(...)`
+  is the normalization scale from RF amplitude units to full-scale.
+- If full-scale DAC code corresponds to `card_max_mV`, use:
+  - `gain = 1.0 / card_max_mV`
+- This convention works for both:
+  - uncalibrated channels (IR amplitudes already represent RF mV),
+  - calibrated channels (`AODSin2Calib` outputs RF mV from optical power requests).
 
 ### Practical workflow
 

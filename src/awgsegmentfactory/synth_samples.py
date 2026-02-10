@@ -530,6 +530,7 @@ def synthesize_sequence_program(
     Synthesize float per-segment, per-channel waveform buffers.
 
     This stage applies optional optical-power calibration from `physical_setup`.
+    The synthesized float buffers represent RF amplitudes in mV.
     It does not apply gain/clip/full_scale int16 quantization.
     """
     q_ir = quantized.resolved_ir
@@ -627,7 +628,15 @@ def quantize_synthesized_program(
     clip: float,
     full_scale: int,
 ) -> CompiledSequenceProgram:
-    """Apply gain/clip/full_scale and convert float segment buffers to int16."""
+    """
+    Apply gain/clip/full_scale and convert float segment buffers to int16.
+
+    Unit convention:
+    - synthesized float buffers are interpreted as RF amplitudes in mV.
+    - `gain` is the normalization scale from mV to full-scale units.
+      For a card configured with max output `card_max_mV`, use
+      `gain = 1.0 / card_max_mV`.
+    """
     if gain <= 0:
         raise ValueError("gain must be > 0")
     if not (0 < clip <= 1.0):
@@ -694,6 +703,11 @@ def compile_sequence_program(
     - `gpu=True, output="numpy"` (default): run synthesis+quantization on GPU, then
       transfer final int16 buffers to NumPy. This avoids transferring intermediate
       float buffers and is typically the fastest path for NumPy output.
+
+    Scaling convention:
+    - `gain` is the normalization factor passed to `quantize_synthesized_program`.
+      If synthesized amplitudes are in mV and AWG full-scale corresponds to
+      `card_max_mV`, set `gain = 1.0 / card_max_mV`.
     """
     if gpu and output == "numpy":
         synthesized_gpu = synthesize_sequence_program(

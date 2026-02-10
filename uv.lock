@@ -117,10 +117,12 @@ source = { editable = "." }
 dependencies = [
     { name = "numpy" },
     { name = "scipy" },
-    { name = "spcm" },
 ]
 
 [package.optional-dependencies]
+control-hardware = [
+    { name = "spcm" },
+]
 cuda = [
     { name = "cupy-cuda13x" },
 ]
@@ -142,9 +144,9 @@ requires-dist = [
     { name = "cupy-cuda13x", marker = "extra == 'cuda'", specifier = ">=13.6.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "scipy", specifier = ">=1.17.0" },
-    { name = "spcm", specifier = ">=1.12.0" },
+    { name = "spcm", marker = "extra == 'control-hardware'", specifier = ">=1.12.0" },
 ]
-provides-extras = ["cuda"]
+provides-extras = ["cuda", "control-hardware"]
 
 [package.metadata.requires-dev]
 dev = [

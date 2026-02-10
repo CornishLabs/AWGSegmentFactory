@@ -48,6 +48,11 @@ class OpticalPowerToRFAmpCalib(ABC):
     also used for crest-factor phase optimisation so the optimiser sees the correct
     RF tone weights.
 
+    Units convention used across this package:
+    - input optical powers are arbitrary units ("arb"), but must be consistent with
+      the calibration data used to fit the model.
+    - returned RF amplitudes are in mV.
+
     Notes:
     - This is "first order": each tone is calibrated independently (no tone interactions).
     - Implementations should be vectorized and support both NumPy (`xp=np`) and (optionally)
@@ -63,7 +68,7 @@ class OpticalPowerToRFAmpCalib(ABC):
         logical_channel: str,
         xp: Any = np,
     ) -> Any:
-        """Return RF synthesis amplitudes (same shape as `optical_powers`)."""
+        """Return RF synthesis amplitudes in mV (same shape as `optical_powers`)."""
         raise NotImplementedError
 
 
@@ -97,7 +102,12 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
         v0(freq) = sqrt(polyval(v0_a_poly, x)^2 + min_v0_sq)
 
     Inversion (used to synthesize RF amplitudes from desired optical powers):
-        rf_amp = amp_scale * v0(freq) * (2/π) * arcsin(sqrt(optical_power / g(freq)))
+        rf_amp = v0(freq) * (2/π) * arcsin(sqrt(optical_power / g(freq)))
+
+    Units:
+    - `g(freq)` is optical power in arbitrary units (arb).
+    - `v0(freq)` is RF amplitude in mV (it is a function of frequency, not a frequency).
+    - `rf_amp` returned by inversion is in mV.
 
     Notes:
     - This is globally invertible for optical_power in [0, g(freq)] if you restrict to the
@@ -110,7 +120,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
     freq_min_hz: float
     freq_max_hz: float
     traceability_string: str = ""
-    amp_scale: float = 1.0
     min_g: float = 1e-12
     min_v0_sq: float = 1e-12
     y_eps: float = 1e-6
@@ -126,8 +135,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             raise ValueError("freq_max_hz must be finite")
         if float(self.freq_max_hz) <= float(self.freq_min_hz):
             raise ValueError("freq_max_hz must be > freq_min_hz")
-        if not np.isfinite(float(self.amp_scale)) or float(self.amp_scale) <= 0:
-            raise ValueError("amp_scale must be finite and > 0")
         if not np.isfinite(float(self.min_g)) or float(self.min_g) <= 0:
             raise ValueError("min_g must be finite and > 0")
         if not np.isfinite(float(self.min_v0_sq)) or float(self.min_v0_sq) <= 0:
@@ -172,8 +179,7 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
 
         y = xp.maximum(p_opt, 0.0) / g
         y = xp.clip(y, 0.0, 1.0 - float(self.y_eps))
-        rf_amp = v0 * (2.0 / float(np.pi)) * xp.arcsin(xp.sqrt(y))
-        return float(self.amp_scale) * rf_amp
+        return v0 * (2.0 / float(np.pi)) * xp.arcsin(xp.sqrt(y))
 
     @property
     def best_freq_hz(self) -> int:
@@ -199,7 +205,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             "freq_max_hz": float(self.freq_max_hz),
             "traceability_string": str(self.traceability_string),
             "best_freq_hz": int(self.best_freq_hz),
-            "amp_scale": float(self.amp_scale),
             "min_g": float(self.min_g),
             "min_v0_sq": float(self.min_v0_sq),
             "y_eps": float(self.y_eps),
@@ -213,7 +218,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             freq_min_hz=float(data["freq_min_hz"]),
             freq_max_hz=float(data["freq_max_hz"]),
             traceability_string=str(data.get("traceability_string", "")),
-            amp_scale=float(data["amp_scale"]),
             min_g=float(data.get("min_g", 1e-12)),
             min_v0_sq=float(data.get("min_v0_sq", 1e-12)),
             y_eps=float(data.get("y_eps", 1e-6)),
@@ -228,7 +232,10 @@ class AWGPhysicalSetupInfo(OpticalPowerToRFAmpCalib):
     - optional per-hardware-channel optical-power calibration.
 
     If a channel has no calibration (`None`), amplitudes are interpreted as direct RF
-    synthesis amplitudes for that channel.
+    synthesis amplitudes (mV by convention) for that channel.
+
+    If a channel has an `AODSin2Calib`, amplitudes are interpreted as desired optical
+    powers (arb), and are converted to RF amplitudes (mV) during synthesis.
     """
 
     logical_to_hardware_map: Dict[str, int]
