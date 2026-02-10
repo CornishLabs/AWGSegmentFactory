@@ -57,7 +57,7 @@ class TestQuantizedIRCodec(unittest.TestCase):
         )
 
         ir = b.build_resolved_ir(sample_rate_hz=fs)
-        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
+        q = quantize_resolved_ir(ir)
 
         encoded = q.encode()
         _assert_encodable(encoded)

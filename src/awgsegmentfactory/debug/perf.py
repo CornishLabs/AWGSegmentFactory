@@ -60,15 +60,14 @@ def compile_builder_pipeline_timed(
 
     resolved = resolve_intent_ir(intent, sample_rate_hz=sample_rate_hz)
     t3 = perf_counter()
-    quantized = quantize_resolved_ir(
-        resolved, logical_channel_to_hardware_channel=logical_channel_to_hardware_channel
-    )
+    quantized = quantize_resolved_ir(resolved)
     t4 = perf_counter()
     compiled = compile_sequence_program(
         quantized,
         gain=gain,
         clip=clip,
         full_scale=full_scale,
+        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         optical_power_calib=optical_power_calib,
         gpu=gpu,
     )

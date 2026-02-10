@@ -66,7 +66,6 @@ from awgsegmentfactory import compile_sequence_program, quantize_resolved_ir
 
 quantized = quantize_resolved_ir(
     ir,
-    logical_channel_to_hardware_channel={"H": 0, "V": 1},
 )
 
 compiled = compile_sequence_program(
@@ -74,6 +73,7 @@ compiled = compile_sequence_program(
     gain=1.0,
     clip=0.9,
     full_scale=32767,
+    logical_channel_to_hardware_channel={"H": 0, "V": 1},
 )
 
 print("segments:", len(compiled.segments))
@@ -211,10 +211,10 @@ flowchart LR
 3) **Resolve (discretize)** (`src/awgsegmentfactory/resolve.py` + `src/awgsegmentfactory/resolved_ir.py`)
    - `resolve_intent_ir(intent, sample_rate_hz=...)` converts seconds → integer `n_samples` and produces `ResolvedIR`.
 4) **Quantise for hardware** (`src/awgsegmentfactory/quantize.py`)
-   - `quantize_resolved_ir(resolved, logical_channel_to_hardware_channel=...)` returns a `QuantizedIR`:
+   - `quantize_resolved_ir(resolved)` returns a `QuantizedIR`:
      a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
-   - `compile_sequence_program(quantized, ...)` synthesises per-segment int16 waveforms plus a sequence
+   - `compile_sequence_program(quantized, logical_channel_to_hardware_channel=..., ...)` synthesises per-segment int16 waveforms plus a sequence
      step table (`CompiledSequenceProgram`).
 
 For plotting/state queries there is also a debug view:

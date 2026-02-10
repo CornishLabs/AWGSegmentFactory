@@ -147,7 +147,7 @@ def main() -> None:
     _describe_ir(ir)
 
     # ---- 4) QuantizedIR (hardware-aligned) ----
-    q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0, "V": 1})
+    q = quantize_resolved_ir(ir)
     print("\n== QuantizedIR (hardware-aligned) ==")
     for qi in q.quantization:
         print(

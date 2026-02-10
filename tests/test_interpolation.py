@@ -79,10 +79,7 @@ class TestInterpolation(unittest.TestCase):
             segments=(seg0,),
         )
 
-        quantized = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        quantized = quantize_resolved_ir(ir)
         prog = compile_sequence_program(
             quantized,
             gain=1.0,

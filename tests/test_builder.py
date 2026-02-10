@@ -99,10 +99,7 @@ class TestBuilder(unittest.TestCase):
             places=12,
         )
 
-        quantized = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        quantized = quantize_resolved_ir(ir)
         q_ir = quantized.resolved_ir
         q_info = quantized.quantization
         self.assertEqual(q_ir.segments[0].n_samples, 96)
@@ -127,10 +124,7 @@ class TestBuilder(unittest.TestCase):
         ir = b.build_resolved_ir(sample_rate_hz=fs)
         self.assertEqual(ir.segments[0].n_samples, 1)
 
-        quantized = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1},
-        )
+        quantized = quantize_resolved_ir(ir)
         q_ir = quantized.resolved_ir
         q_info = quantized.quantization
 
@@ -195,10 +189,7 @@ class TestBuilder(unittest.TestCase):
         self.assertEqual(v_part.end.amps.shape, (2,))
         self.assertAlmostEqual(float(v_part.end.amps[1]), 1.0, places=12)
 
-        quantized = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        quantized = quantize_resolved_ir(ir)
         prog = compile_sequence_program(
             quantized,
             gain=1.0,

@@ -20,25 +20,9 @@ from awgsegmentfactory.quantize import quantize_resolved_ir
 from sequence_repo import recreate_mol_exp
 
 
-def _parse_channel_map(items: list[str]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for x in items:
-        if "=" not in x:
-            raise ValueError(f"Invalid --map entry {x!r}; expected like H=0")
-        k, v = x.split("=", 1)
-        out[str(k)] = int(v)
-    return out
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fs", type=float, default=625e6, help="Sample rate in Hz.")
-    parser.add_argument(
-        "--map",
-        nargs="*",
-        default=["H=0", "V=1"],
-        help="Logical->hardware channel map entries like H=0 V=1.",
-    )
     parser.add_argument(
         "--out",
         type=str,
@@ -54,7 +38,7 @@ def main() -> None:
 
     builder = recreate_mol_exp()
     ir = builder.build_resolved_ir(sample_rate_hz=float(args.fs))
-    q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel=_parse_channel_map(args.map))
+    q = quantize_resolved_ir(ir)
     encoded = q.encode()
 
     if args.out:
@@ -71,4 +55,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

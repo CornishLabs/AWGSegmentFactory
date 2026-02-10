@@ -467,12 +467,51 @@ def compiled_sequence_program_to_numpy(
     )
 
 
+def _validate_channel_map(
+    logical_channels: tuple[str, ...],
+    logical_channel_to_hardware_channel: Optional[ChannelMap],
+) -> tuple[ChannelMap, int]:
+    if logical_channel_to_hardware_channel is None:
+        mapping: ChannelMap = {
+            str(logical_channel): i
+            for i, logical_channel in enumerate(logical_channels)
+        }
+    else:
+        mapping = {
+            str(k): int(v) for k, v in logical_channel_to_hardware_channel.items()
+        }
+
+    missing = [lc for lc in logical_channels if lc not in mapping]
+    if missing:
+        raise KeyError(
+            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
+        )
+    hw = [int(mapping[lc]) for lc in logical_channels]
+    if any(h < 0 for h in hw):
+        raise ValueError(
+            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
+        )
+    if len(set(hw)) != len(hw):
+        raise ValueError(
+            "Each logical channel must map to a unique hardware channel; "
+            f"got {sorted(hw)} for logical_channels={list(logical_channels)}"
+        )
+    hw_set = set(hw)
+    if hw_set != set(range(len(hw_set))):
+        raise ValueError(
+            "Hardware channel indices must be contiguous 0..N-1; "
+            f"got {sorted(hw_set)}"
+        )
+    return mapping, len(hw_set)
+
+
 def compile_sequence_program(
     quantized: QuantizedIR,
     *,
     gain: float,
     clip: float,
     full_scale: int,
+    logical_channel_to_hardware_channel: Optional[ChannelMap] = None,
     optical_power_calib: Optional[OpticalPowerToRFAmpCalib] = None,
     gpu: bool = False,
     output: Literal["numpy", "cupy"] = "numpy",
@@ -500,6 +539,11 @@ def compile_sequence_program(
 
     Note: resolve/quantize stages are still CPU/NumPy.
 
+    Channel mapping:
+    - `logical_channel_to_hardware_channel` controls how logical channels map into output
+      rows of each compiled segment buffer.
+    - If omitted, a default contiguous mapping in logical-channel order is used.
+
     Phase modes:
     - Each segment has `phase_mode in {"manual","continue","optimise"}`.
     - `"continue"`/`"optimise"` may run a small CPU-side crest-factor phase optimiser
@@ -516,37 +560,15 @@ def compile_sequence_program(
         raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
 
     q_ir = quantized.resolved_ir
-    logical_channel_to_hardware_channel = quantized.logical_channel_to_hardware_channel
+    logical_channel_to_hardware_channel, n_channels = _validate_channel_map(
+        q_ir.logical_channels, logical_channel_to_hardware_channel
+    )
     q_info = quantized.quantization
     amp_calib = optical_power_calib
-
-    missing = [lc for lc in q_ir.logical_channels if lc not in logical_channel_to_hardware_channel]
-    if missing:
-        raise KeyError(
-            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
-        )
-    hw = [int(logical_channel_to_hardware_channel[lc]) for lc in q_ir.logical_channels]
-    if any(h < 0 for h in hw):
-        raise ValueError(
-            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
-        )
-    if len(set(hw)) != len(hw):
-        raise ValueError(
-            "Each logical channel must map to a unique hardware channel; "
-            f"got {sorted(hw)} for logical_channels={list(q_ir.logical_channels)}"
-        )
-    hw_set = set(hw)
-    if hw_set != set(range(len(hw_set))):
-        raise ValueError(
-            "Hardware channel indices must be contiguous 0..N-1; "
-            f"got {sorted(hw_set)}"
-        )
 
     n_segments = len(q_ir.segments)
     if n_segments == 0:
         raise ValueError("No segments to compile")
-
-    n_channels = len(hw_set)
 
     compiled_segments: list[CompiledSegment] = []
     compiled_steps: list[SequenceStep] = []

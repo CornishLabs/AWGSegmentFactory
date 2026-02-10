@@ -127,7 +127,6 @@ def main() -> None:
     )
     q = quantize_resolved_ir(
         ir,
-        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         segment_quantum_s=segment_quantum_s,
         step_samples=int(args.step_samples),
     )
@@ -139,6 +138,7 @@ def main() -> None:
         gain=1.0,
         clip=0.9,
         full_scale=full_scale_default,
+        logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
     )
 
     print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
@@ -187,6 +187,7 @@ def main() -> None:
                 gain=1.0,
                 clip=0.9,
                 full_scale=full_scale,
+                logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             )
 
             sequence = spcm.Sequence(card)
@@ -209,4 +210,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -79,10 +79,7 @@ class TestSampleCompile(unittest.TestCase):
             logical_channels=("H", "V", "A", "B"),
             segments=(seg0,),
         )
-        q = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        q = quantize_resolved_ir(ir)
         with self.assertRaises(ValueError):
             compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000, output="cupy")
 
@@ -152,14 +149,8 @@ class TestSampleCompile(unittest.TestCase):
         )
 
         full_scale = 20000
-        q_continue = quantize_resolved_ir(
-            ir_continue,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
-        q_manual = quantize_resolved_ir(
-            ir_manual,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        q_continue = quantize_resolved_ir(ir_continue)
+        q_manual = quantize_resolved_ir(ir_manual)
         prog_continue = compile_sequence_program(
             q_continue,
             gain=1.0,
@@ -269,14 +260,8 @@ class TestSampleCompile(unittest.TestCase):
         )
 
         full_scale = 20000
-        q_continue = quantize_resolved_ir(
-            ir_continue,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
-        q_manual = quantize_resolved_ir(
-            ir_manual,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        q_continue = quantize_resolved_ir(ir_continue)
+        q_manual = quantize_resolved_ir(ir_manual)
         prog_continue = compile_sequence_program(
             q_continue,
             gain=1.0,
@@ -339,10 +324,7 @@ class TestSampleCompile(unittest.TestCase):
             logical_channels=("H", "V", "A", "B"),
             segments=(seg0,),
         )
-        q = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        q = quantize_resolved_ir(ir)
         prog = compile_sequence_program(q, gain=1.0, clip=1.0, full_scale=20000)
         self.assertEqual(prog.segments[0].data_i16.shape, (4, n))
 
@@ -371,7 +353,7 @@ class TestSampleCompile(unittest.TestCase):
             phase_mode="manual",
         )
         ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg0,))
-        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
+        q = quantize_resolved_ir(ir)
         full_scale = 20000
         prog_uncal = compile_sequence_program(
             q, gain=1.0, clip=1.0, full_scale=full_scale
@@ -417,10 +399,7 @@ class TestSampleCompile(unittest.TestCase):
             logical_channels=("H",),
             segments=(seg0,),
         )
-        q = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0},
-        )
+        q = quantize_resolved_ir(ir)
 
         captured: dict[str, np.ndarray] = {}
 

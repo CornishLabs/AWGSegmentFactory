@@ -208,16 +208,12 @@ def sequence_samples_debug(
             gain=gain,
             clip=clip,
             full_scale=full_scale,
+            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             optical_power_calib=optical_power_calib,
         )
     else:
-        if logical_channel_to_hardware_channel is None:
-            raise ValueError(
-                "logical_channel_to_hardware_channel is required when passing a ResolvedIR"
-            )
         quantized = quantize_resolved_ir(
             program,
-            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
         )
         q_ir = quantized.resolved_ir
         compiled = compile_sequence_program(
@@ -225,6 +221,7 @@ def sequence_samples_debug(
             gain=gain,
             clip=clip,
             full_scale=full_scale,
+            logical_channel_to_hardware_channel=logical_channel_to_hardware_channel,
             optical_power_calib=optical_power_calib,
         )
     need_params = bool(show_param_traces) or bool(show_spot_grid)

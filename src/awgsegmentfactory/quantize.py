@@ -4,7 +4,7 @@ This stage takes a `ResolvedIR` and applies Spectrum sequence-mode constraints:
 - segment length snapping (minimum sizes, step sizes, optional global quantum)
 - optional wrap-friendly snapping for constant, loopable segments
 
-The result is a `QuantizedIR` (a `ResolvedIR` plus quantization metadata and channel mapping).
+The result is a `QuantizedIR` (a `ResolvedIR` plus quantization metadata).
 """
 
 from __future__ import annotations
@@ -21,12 +21,11 @@ from .resolved_ir import (
     ResolvedSegment,
 )
 from .resolved_timeline import LogicalChannelState
-from .types import ChannelMap
 from .intent_ir import InterpSpec
 
 
 _ENCODED_QUANTIZED_IR_SCHEMA = "awgsegmentfactory.quantize.QuantizedIR"
-_ENCODED_QUANTIZED_IR_VERSION = 2
+_ENCODED_QUANTIZED_IR_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -61,7 +60,6 @@ class QuantizedIR:
     """Output of `quantize_resolved_ir`: a resolved IR plus quantization metadata."""
 
     resolved_ir: ResolvedIR
-    logical_channel_to_hardware_channel: ChannelMap
     quantization: tuple[SegmentQuantizationInfo, ...]
 
     def encode(self) -> dict[str, object]:
@@ -76,9 +74,6 @@ class QuantizedIR:
             "__schema__": _ENCODED_QUANTIZED_IR_SCHEMA,
             "version": _ENCODED_QUANTIZED_IR_VERSION,
             "resolved_ir": _encode_resolved_ir(self.resolved_ir),
-            "logical_channel_to_hardware_channel": dict(
-                self.logical_channel_to_hardware_channel
-            ),
             "quantization": tuple(
                 _encode_segment_quantization_info(qi) for qi in self.quantization
             ),
@@ -99,21 +94,15 @@ class QuantizedIR:
                 f"QuantizedIR.decode: unsupported schema {schema!r} "
                 f"(expected {_ENCODED_QUANTIZED_IR_SCHEMA!r})"
             )
-        if version not in (1, _ENCODED_QUANTIZED_IR_VERSION):
+        if version != _ENCODED_QUANTIZED_IR_VERSION:
             raise ValueError(
                 f"QuantizedIR.decode: unsupported version {version!r} "
-                f"(expected 1 or {_ENCODED_QUANTIZED_IR_VERSION})"
+                f"(expected {_ENCODED_QUANTIZED_IR_VERSION})"
             )
 
         resolved_ir = _decode_resolved_ir(
             _require_dict(data.get("resolved_ir"), "resolved_ir")
         )
-
-        mapping_raw = _require_dict(
-            data.get("logical_channel_to_hardware_channel"),
-            "logical_channel_to_hardware_channel",
-        )
-        mapping: ChannelMap = {str(k): int(v) for k, v in mapping_raw.items()}
 
         quantization_raw = data.get("quantization", ())
         if isinstance(quantization_raw, tuple):
@@ -131,7 +120,6 @@ class QuantizedIR:
 
         return cls(
             resolved_ir=resolved_ir,
-            logical_channel_to_hardware_channel=mapping,
             quantization=quantization,
         )
 
@@ -515,7 +503,6 @@ def _shift_segment_freqs(
 def quantize_resolved_ir(
     ir: ResolvedIR,
     *,
-    logical_channel_to_hardware_channel: ChannelMap,
     segment_quantum_s: float = 40e-6,
     step_samples: int = 32,
 ) -> QuantizedIR:
@@ -531,32 +518,11 @@ def quantize_resolved_ir(
       - constant segments get optional frequency wrap-snapping (`snap_freqs_to_wrap=True` by default).
     """
     fs = float(ir.sample_rate_hz)
-    missing = [lc for lc in ir.logical_channels if lc not in logical_channel_to_hardware_channel]
-    if missing:
-        raise KeyError(
-            f"Missing hardware channel mapping for logical channels: {', '.join(missing)}"
-        )
-    hw = [int(logical_channel_to_hardware_channel[lc]) for lc in ir.logical_channels]
-    if any(h < 0 for h in hw):
-        raise ValueError(
-            f"Hardware channel indices must be >= 0, got {sorted(set(hw))}"
-        )
-    if len(set(hw)) != len(hw):
-        raise ValueError(
-            "Each logical channel must map to a unique hardware channel; "
-            f"got {sorted(hw)} for logical_channels={list(ir.logical_channels)}"
-        )
-    hw_set = set(hw)
-    if hw_set != set(range(len(hw_set))):
-        raise ValueError(
-            "Hardware channel indices must be contiguous 0..N-1; "
-            f"got {sorted(hw_set)}"
-        )
     q_samples = quantum_samples(
         fs, quantum_s=segment_quantum_s, step_samples=step_samples
     )
 
-    n_channels = len(hw_set)
+    n_channels = len(ir.logical_channels)
     min_samples = min_segment_samples_per_channel(n_channels=n_channels)
     min_samples = _ceil_to_multiple(min_samples, step_samples)
 
@@ -725,6 +691,5 @@ def quantize_resolved_ir(
     )
     return QuantizedIR(
         resolved_ir=q_ir,
-        logical_channel_to_hardware_channel=dict(logical_channel_to_hardware_channel),
         quantization=tuple(infos),
     )

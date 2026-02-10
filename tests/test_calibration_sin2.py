@@ -77,7 +77,7 @@ class TestAODSin2Calib(unittest.TestCase):
             logical_channels=("H",),
             segments=(seg0,),
         )
-        q = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
+        q = quantize_resolved_ir(ir)
         prog = compile_sequence_program(
             q,
             gain=1.0,

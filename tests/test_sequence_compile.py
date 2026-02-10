@@ -58,9 +58,7 @@ class TestSequenceCompile(unittest.TestCase):
         )
         ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H", "V"), segments=(seg,))
 
-        quantized = quantize_resolved_ir(
-            ir, logical_channel_to_hardware_channel={"H": 0, "V": 1}
-        )
+        quantized = quantize_resolved_ir(ir)
         q_ir = quantized.resolved_ir
         info = quantized.quantization
         self.assertEqual(info[0].original_samples, 193)
@@ -109,10 +107,7 @@ class TestSequenceCompile(unittest.TestCase):
             sample_rate_hz=fs, logical_channels=("H", "V", "A", "B"), segments=(seg,)
         )
 
-        quantized = quantize_resolved_ir(
-            ir,
-            logical_channel_to_hardware_channel={"H": 0, "V": 1, "A": 2, "B": 3},
-        )
+        quantized = quantize_resolved_ir(ir)
         q_ir = quantized.resolved_ir
         info = quantized.quantization
 
@@ -167,7 +162,7 @@ class TestSequenceCompile(unittest.TestCase):
         )
         ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg_wait, seg_after))
 
-        quantized = quantize_resolved_ir(ir, logical_channel_to_hardware_channel={"H": 0})
+        quantized = quantize_resolved_ir(ir)
         q_ir = quantized.resolved_ir
 
         seg0 = q_ir.segments[0]

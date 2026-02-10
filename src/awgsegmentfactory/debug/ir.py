@@ -154,8 +154,7 @@ def format_quantized_ir(
         "QuantizedIR: "
         f"segments={len(q.segments)} "
         f"fs_hz={fs:.6g} "
-        f"logical_channels={q.logical_channels} "
-        f"logical_channel_to_hardware_channel={dict(q.logical_channel_to_hardware_channel)}"
+        f"logical_channels={q.logical_channels}"
     )
 
     qis, hidden = _limit(q.quantization, max_items=max_segments)
