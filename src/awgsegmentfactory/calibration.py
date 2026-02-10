@@ -204,9 +204,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             "y_eps": float(self.y_eps),
         }
 
-    def serialize(self) -> Dict[str, Any]:
-        return self.serialise()
-
     @classmethod
     def deserialise(cls, data: Mapping[str, Any]) -> "AODSin2Calib":
         return cls(
@@ -220,10 +217,6 @@ class AODSin2Calib(OpticalPowerToRFAmpCalib):
             min_v0_sq=float(data.get("min_v0_sq", 1e-12)),
             y_eps=float(data.get("y_eps", 1e-6)),
         )
-
-    @classmethod
-    def deserialize(cls, data: Mapping[str, Any]) -> "AODSin2Calib":
-        return cls.deserialise(data)
 
 
 @dataclass(frozen=True)
@@ -299,9 +292,6 @@ class AWGCalibration(OpticalPowerToRFAmpCalib):
             "channel_calibrations": [c.serialise() for c in self.channel_calibrations],
         }
 
-    def serialize(self) -> Dict[str, Any]:
-        return self.serialise()
-
     @classmethod
     def deserialise(cls, data: Mapping[str, Any]) -> "AWGCalibration":
         raw = data.get("channel_calibrations")
@@ -315,10 +305,6 @@ class AWGCalibration(OpticalPowerToRFAmpCalib):
             },
             channel_calibrations=tuple(AODSin2Calib.deserialise(x) for x in raw),
         )
-
-    @classmethod
-    def deserialize(cls, data: Mapping[str, Any]) -> "AWGCalibration":
-        return cls.deserialise(data)
 
     def to_file(self, path: str | Path) -> None:
         out = Path(path)

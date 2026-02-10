@@ -7,7 +7,6 @@ This package implements a small pipeline:
 
 from .builder import AWGProgramBuilder
 from .calibration import AODSin2Calib, AWGCalibration, LinearPositionToFreqCalib
-from .calibration_characterization import CalibrationCharacterization
 from .intent_ir import IntentIR
 from .resolved_ir import ResolvedIR
 from .resolve import resolve_intent_ir
@@ -32,7 +31,6 @@ __all__ = [
     "LinearPositionToFreqCalib",
     "AODSin2Calib",
     "AWGCalibration",
-    "CalibrationCharacterization",
     "IntentIR",
     "ResolvedIR",
     "resolve_intent_ir",

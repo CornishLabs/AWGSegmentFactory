@@ -85,16 +85,10 @@ class QuantizedIR:
         }
 
     @classmethod
-    def decode(
-        cls, data: dict[str, object], *, allow_unsafe_imports: bool = False
-    ) -> "QuantizedIR":
+    def decode(cls, data: dict[str, object]) -> "QuantizedIR":
         """
         Decode a dictionary previously produced by `QuantizedIR.encode()`.
-
-        Note:
-        - `allow_unsafe_imports` is ignored (retained for backwards compatibility).
         """
-        _ = allow_unsafe_imports
         if not isinstance(data, dict):
             raise TypeError("QuantizedIR.decode: data must be a dict")
 

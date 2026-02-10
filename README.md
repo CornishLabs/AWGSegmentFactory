@@ -126,21 +126,61 @@ If you pass an `OpticalPowerToRFAmpCalib` calibration object to `compile_sequenc
 IR are treated as *desired optical power* (arbitrary units), and sample synthesis converts `(freq, optical_power)`
 to the RF synthesis amplitudes actually used for sample generation.
 
-Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
-- `AODSin2Calib`: single-channel sin² model,
-  `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (invertible on the first lobe).
-- `AWGCalibration`: maps logical channel names to physical channel indices and dispatches to per-channel `AODSin2Calib` objects.
-  - Small-signal limit: `sin(z)≈z`, so `optical_power ≈ g * ((π/2) * rf_amp / v0)^2` (square-law).
+### Calibration concepts
 
-Typical workflow:
-1) Record calibration data from your setup (either per-frequency `DE vs RF amplitude` curves or iso-power `(freq, amp)` points).
-2) Fit one `AODSin2Calib` per physical channel.
-3) Wrap them in `AWGCalibration` and pass via
-   `compile_sequence_program(..., optical_power_calib=calib)`.
+`AODSin2Calib` models a single hardware channel with:
+
+`optical_power(freq, rf_amp_mV) ≈ g(freq) * sin^2((π/2) * rf_amp_mV / v0(freq))`
+
+- `g(freq)`: maximum reachable optical power (arb) at each frequency.
+- `v0(freq)`: RF-amplitude scale (mV) controlling where saturation occurs.
+- Inversion is used at compile time:
+  desired optical power -> required RF amplitude.
+- Behavior at limits:
+  - negative optical powers are clamped to `0`.
+  - requests above reachable power are clamped just below full scale of the model (`1 - y_eps` in normalized space).
+  - frequencies outside calibrated bounds are evaluated using edge-clamped normalized frequency.
+
+`AODSin2Calib` also stores:
+- `freq_min_hz` and `freq_max_hz`: where data supports the fit.
+- `traceability_string`: free-form provenance (filename, lab-book note, date, etc).
+- derived `best_freq_hz`: frequency with highest fitted `g(freq)` within `[freq_min_hz, freq_max_hz]`.
+
+### Calibration objects
+
+Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
+
+- `AODSin2Calib`
+  - single-channel model + metadata.
+  - serializable via `serialise` / `deserialise`.
+
+- `AWGCalibration`
+  - container passed to `compile_sequence_program(..., optical_power_calib=...)`.
+  - serializable via `serialise` / `deserialise` and `to_file` / `from_file`.
+  - fields:
+    - `N_ch: int`
+    - `logical_to_hardware_map: Dict[str, int]`
+    - `channel_calibrations: Tuple[AODSin2Calib, ...]`
+  - routes each logical channel in the IR to the correct physical-channel calibration.
+
+### Practical workflow
+
+1) Measure calibration data from your setup:
+   - DE-compensation JSON (`DE_RF_calibration`),
+   - `.awgde`,
+   - or CSV point cloud `(freq_MHz, rf_amp_mV, power_arb)`.
+2) Fit calibrations with:
+   - `python -m awgsegmentfactory.tools.fit_optical_power_calibration ...`
+   - pass one `--input-data-file` per hardware channel.
+   - optionally set mapping with repeated `--logical-to-hardware-map`, e.g. `H=0`, `V=1`.
+   - optionally set provenance with repeated `--traceability-string`.
+3) Save JSON output (`--write-out`) and load as `AWGCalibration.from_file(...)`.
+4) Compile with calibration:
+   - `compile_sequence_program(..., optical_power_calib=awg_calibration)`.
 
 Examples:
 - `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
-- `examples/fit_optical_power_calibration.py` (fit `AODSin2Calib` from a calibration file and print a Python constant)
+- `examples/fit_optical_power_calibration.py` (fit and inspect generated `AODSin2Calib`/`AWGCalibration`)
 - `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, compile with calibration, and debug samples)
 
 ## Compilation stages (mental model)
