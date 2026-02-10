@@ -2,7 +2,7 @@
 
 Pipeline in this module:
 - `synthesize_sequence_program`: `QuantizedIR` -> float waveform buffers
-- `quantize_synthesized_program`: float buffers -> int16 buffers
+- `quantise_and_normalise_voltage_for_awg`: float buffers -> int16 buffers
 - `compile_sequence_program`: convenience wrapper for both stages
 """
 
@@ -70,7 +70,7 @@ class CompiledSequenceProgram:
 
     sample_rate_hz: float
     physical_setup: AWGPhysicalSetupInfo
-    gain: float
+    full_scale_mv: float
     clip: float
     full_scale: int
     segments: Tuple[CompiledSegment, ...]
@@ -510,7 +510,7 @@ def compiled_sequence_program_to_numpy(
     return CompiledSequenceProgram(
         sample_rate_hz=prog.sample_rate_hz,
         physical_setup=prog.physical_setup,
-        gain=float(prog.gain),
+        full_scale_mv=float(prog.full_scale_mv),
         clip=float(prog.clip),
         full_scale=int(prog.full_scale),
         segments=tuple(out_segments),
@@ -531,7 +531,7 @@ def synthesize_sequence_program(
 
     This stage applies optional optical-power calibration from `physical_setup`.
     The synthesized float buffers represent RF amplitudes in mV.
-    It does not apply gain/clip/full_scale int16 quantization.
+    It does not apply full_scale_mv/clip/full_scale int16 quantization.
     """
     q_ir = quantized.resolved_ir
     q_info = quantized.quantization
@@ -621,24 +621,23 @@ def synthesize_sequence_program(
     )
 
 
-def quantize_synthesized_program(
-    synthesized: SynthesizedSequenceProgram,
+def quantise_and_normalise_voltage_for_awg(
+    synthesised: SynthesizedSequenceProgram,
     *,
-    gain: float,
-    clip: float,
+    full_scale_mv: float,
     full_scale: int,
+    clip: float = 1.0,
 ) -> CompiledSequenceProgram:
     """
-    Apply gain/clip/full_scale and convert float segment buffers to int16.
+    Convert synthesized RF-voltage buffers (mV) into int16 AWG samples.
 
-    Unit convention:
-    - synthesized float buffers are interpreted as RF amplitudes in mV.
-    - `gain` is the normalization scale from mV to full-scale units.
-      For a card configured with max output `card_max_mV`, use
-      `gain = 1.0 / card_max_mV`.
+    Conversion:
+    - normalize by configured AWG full-scale voltage: `v_norm = data_mV / full_scale_mv`
+    - clip to `[-clip, +clip]`
+    - quantize with `full_scale` DAC code range.
     """
-    if gain <= 0:
-        raise ValueError("gain must be > 0")
+    if full_scale_mv <= 0:
+        raise ValueError("full_scale_mv must be > 0")
     if not (0 < clip <= 1.0):
         raise ValueError("clip must be in (0, 1]")
     if full_scale <= 0:
@@ -647,17 +646,18 @@ def quantize_synthesized_program(
     if full_scale > max_i16:
         raise ValueError(f"full_scale must be <= {max_i16} for int16 output")
 
+    scale = 1.0 / float(full_scale_mv)
     out_segments: list[CompiledSegment] = []
-    for seg in synthesized.segments:
+    for seg in synthesised.segments:
         data = seg.data
         if isinstance(data, np.ndarray):
-            y = np.clip(float(gain) * data, -float(clip), float(clip))
+            y = np.clip(scale * data, -float(clip), float(clip))
             data_i16 = np.rint(y * float(full_scale)).astype(np.int16)
         else:
             try:
                 import cupy as cp  # type: ignore
 
-                y = cp.clip(float(gain) * data, -float(clip), float(clip))
+                y = cp.clip(scale * data, -float(clip), float(clip))
                 data_i16 = cp.rint(y * float(full_scale)).astype(cp.int16)
             except Exception as exc:  # pragma: no cover
                 raise RuntimeError(
@@ -673,14 +673,14 @@ def quantize_synthesized_program(
         )
 
     return CompiledSequenceProgram(
-        sample_rate_hz=synthesized.sample_rate_hz,
-        physical_setup=synthesized.physical_setup,
-        gain=float(gain),
+        sample_rate_hz=synthesised.sample_rate_hz,
+        physical_setup=synthesised.physical_setup,
+        full_scale_mv=float(full_scale_mv),
         clip=float(clip),
         full_scale=int(full_scale),
         segments=tuple(out_segments),
-        steps=tuple(synthesized.steps),
-        quantization=tuple(synthesized.quantization),
+        steps=tuple(synthesised.steps),
+        quantization=tuple(synthesised.quantization),
     )
 
 
@@ -688,9 +688,9 @@ def compile_sequence_program(
     quantized: QuantizedIR,
     *,
     physical_setup: AWGPhysicalSetupInfo,
-    gain: float,
-    clip: float,
+    full_scale_mv: float,
     full_scale: int,
+    clip: float = 1.0,
     gpu: bool = False,
     output: Literal["numpy", "cupy"] = "numpy",
 ) -> CompiledSequenceProgram:
@@ -705,9 +705,7 @@ def compile_sequence_program(
       float buffers and is typically the fastest path for NumPy output.
 
     Scaling convention:
-    - `gain` is the normalization factor passed to `quantize_synthesized_program`.
-      If synthesized amplitudes are in mV and AWG full-scale corresponds to
-      `card_max_mV`, set `gain = 1.0 / card_max_mV`.
+    - `full_scale_mv` is the AWG output voltage (mV) that maps to `full_scale`.
     """
     if gpu and output == "numpy":
         synthesized_gpu = synthesize_sequence_program(
@@ -716,11 +714,11 @@ def compile_sequence_program(
             gpu=True,
             output="cupy",
         )
-        compiled_gpu = quantize_synthesized_program(
+        compiled_gpu = quantise_and_normalise_voltage_for_awg(
             synthesized_gpu,
-            gain=gain,
-            clip=clip,
+            full_scale_mv=full_scale_mv,
             full_scale=full_scale,
+            clip=clip,
         )
         return compiled_sequence_program_to_numpy(compiled_gpu)
 
@@ -730,9 +728,9 @@ def compile_sequence_program(
         gpu=gpu,
         output=output,
     )
-    return quantize_synthesized_program(
+    return quantise_and_normalise_voltage_for_awg(
         synthesized,
-        gain=gain,
-        clip=clip,
+        full_scale_mv=full_scale_mv,
         full_scale=full_scale,
+        clip=clip,
     )

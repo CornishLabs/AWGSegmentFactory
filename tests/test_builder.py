@@ -194,7 +194,7 @@ class TestBuilder(unittest.TestCase):
         prog = compile_sequence_program(
             quantized,
             physical_setup=AWGPhysicalSetupInfo.identity(quantized.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=20000,
         )

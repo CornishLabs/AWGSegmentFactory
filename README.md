@@ -82,8 +82,7 @@ card_max_mV = 450.0  # match your AWG channel amplitude setting
 compiled = compile_sequence_program(
     quantized,
     physical_setup=physical_setup,
-    gain=1.0 / card_max_mV,
-    clip=0.9,
+    full_scale_mv=card_max_mV,
     full_scale=32767,
 )
 
@@ -102,7 +101,7 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 If you want explicit control of stages, you can use:
 - `synthesize_sequence_program(...)` (float synthesis; optional GPU)
-- `quantize_synthesized_program(...)` (gain/clip/full-scale to int16)
+- `quantise_and_normalise_voltage_for_awg(...)` (full-scale-voltage/clip/full-scale to int16)
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -186,12 +185,13 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
   - if a channel has `AODSin2Calib`, that channel uses IR amplitudes as optical power (arb)
     and converts to RF amplitudes (mV) during synthesis.
 
-### Gain / normalization
+### Voltage normalization
 
-- `gain` in `compile_sequence_program(...)` and `quantize_synthesized_program(...)`
-  is the normalization scale from RF amplitude units to full-scale.
-- If full-scale DAC code corresponds to `card_max_mV`, use:
-  - `gain = 1.0 / card_max_mV`
+- `full_scale_mv` in `compile_sequence_program(...)` and
+  `quantise_and_normalise_voltage_for_awg(...)` is the AWG output voltage (mV)
+  that maps to `full_scale`.
+- If your card is configured to `card_max_mV`, use:
+  - `full_scale_mv = card_max_mV`
 - This convention works for both:
   - uncalibrated channels (IR amplitudes already represent RF mV),
   - calibrated channels (`AODSin2Calib` outputs RF mV from optical power requests).
@@ -247,7 +247,7 @@ flowchart LR
      a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
    - `synthesize_sequence_program(quantized, physical_setup=...)` builds float per-segment waveforms.
-   - `quantize_synthesized_program(...)` applies gain/clip/full-scale and produces int16 buffers.
+   - `quantise_and_normalise_voltage_for_awg(...)` applies full-scale-voltage/clip/full-scale and produces int16 buffers.
    - `compile_sequence_program(...)` is a convenience wrapper for both steps.
 
 For plotting/state queries there is also a debug view:

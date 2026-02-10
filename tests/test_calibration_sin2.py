@@ -83,7 +83,7 @@ class TestAODSin2Calib(unittest.TestCase):
         prog = compile_sequence_program(
             q,
             physical_setup=physical_setup,
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )

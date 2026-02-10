@@ -21,7 +21,7 @@ from awgsegmentfactory import (
     AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
-    quantize_synthesized_program,
+    quantise_and_normalise_voltage_for_awg,
     quantize_resolved_ir,
     synthesize_sequence_program,
 )
@@ -60,8 +60,8 @@ def _build_dc_pulse_program(
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample-rate-hz", type=float, default=625e6)
-    ap.add_argument("--low", type=float, default=0.0, help="DC low level in [-1,1]")
-    ap.add_argument("--high", type=float, default=0.9, help="DC high level in [-1,1]")
+    ap.add_argument("--low", type=float, default=0.0, help="DC low level in mV")
+    ap.add_argument("--high", type=float, default=900.0, help="DC high level in mV")
     ap.add_argument("--pulse-us", type=float, default=20.0, help="Pulse width (µs)")
     ap.add_argument(
         "--segment-quantum-us",
@@ -99,79 +99,62 @@ def main() -> None:
         physical_setup=physical_setup,
     )
 
-    # If you don't have a card connected, use a safe "typical" int16 full-scale.
-    full_scale_default = 32767
-    compiled = quantize_synthesized_program(
-        synthesized,
-        gain=1.0,
-        clip=0.9,
-        full_scale=full_scale_default,
-    )
+    # Match channels.amp(1 * units.V): full-scale output is 1000 mV.
+    full_scale_mv = 1000.0
+    import spcm
+    from spcm import units
 
-    print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
-    print_quantization_report(compiled)
-    print(
-        "Notes:\n"
-        "- EXT0 trigger transitions from 'wait_low' -> 'pulse_high'.\n"
-        "- 'pulse_high' then wraps back to 'wait_low' automatically.\n"
-    )
+    with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:
+        card.card_mode(spcm.SPC_REP_STD_SEQUENCE)
 
-    # Optional: upload to a Spectrum card (requires Spectrum driver + spcm Python package).
-    try:
-        import spcm
-        from spcm import units
-    except Exception as exc:
-        print(f"spcm not available (skipping upload): {exc}")
-        return
+        channels = spcm.Channels(card, card_enable=spcm.CHANNEL0)
+        channels.enable(True)
+        channels.output_load(50 * units.ohm)
+        channels.amp(1 * units.V)
+        channels.stop_level(spcm.SPCM_STOPLVL_HOLDLAST)
 
-    try:
-        with spcm.Card(card_type=spcm.SPCM_TYPE_AO, verbose=False) as card:
-            card.card_mode(spcm.SPC_REP_STD_SEQUENCE)
+        trigger = spcm.Trigger(card)
+        trigger.or_mask(spcm.SPC_TMASK_EXT0)
+        trigger.ext0_mode(spcm.SPC_TM_POS)
+        trigger.ext0_level0(0.3 * units.V)
+        trigger.ext0_coupling(spcm.COUPLING_DC)
+        trigger.termination(1)  # 50 Ohm
+        trigger.delay(0)
 
-            channels = spcm.Channels(card, card_enable=spcm.CHANNEL0)
-            channels.enable(True)
-            channels.output_load(50*units.ohm)
-            channels.amp(1 * units.V)
-            channels.stop_level(spcm.SPCM_STOPLVL_HOLDLAST)
+        clock = spcm.Clock(card)
+        clock.mode(spcm.SPC_CM_INTPLL)
+        clock.sample_rate(sample_rate_hz * units.Hz)
+        clock.clock_output(False)
 
-            trigger = spcm.Trigger(card)
-            trigger.or_mask(spcm.SPC_TMASK_EXT0)
-            trigger.ext0_mode(spcm.SPC_TM_POS)
-            trigger.ext0_level0(0.3 * units.V)
-            trigger.ext0_coupling(spcm.COUPLING_DC)
-            trigger.termination(1) #50 Ohm
-            trigger.delay(0)
+        # Quantize once with the card's exact DAC scaling.
+        full_scale = int(card.max_sample_value()) - 1
+        compiled = quantise_and_normalise_voltage_for_awg(
+            synthesized,
+            full_scale_mv=full_scale_mv,
+            full_scale=full_scale,
+        )
 
-            clock = spcm.Clock(card)
-            clock.mode(spcm.SPC_CM_INTPLL)
-            clock.sample_rate(compiled.sample_rate_hz * units.Hz)
-            clock.clock_output(False)
+        print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
+        print_quantization_report(compiled)
+        print(
+            "Notes:\n"
+            "- EXT0 trigger transitions from 'wait_low' -> 'pulse_high'.\n"
+            "- 'pulse_high' then wraps back to 'wait_low' automatically.\n"
+        )
 
-            # Re-quantize with the card's exact DAC scaling.
-            full_scale = int(card.max_sample_value()) - 1
-            compiled = quantize_synthesized_program(
-                synthesized,
-                gain=1.0,
-                clip=0.9,
-                full_scale=full_scale,
-            )
+        sequence = spcm.Sequence(card)
+        setup_spcm_sequence_from_compiled(sequence, compiled)
+        print("sequence written; starting card (Ctrl+C to stop)")
 
-            sequence = spcm.Sequence(card)
-            setup_spcm_sequence_from_compiled(sequence, compiled)
-            print("sequence written; starting card (Ctrl+C to stop)")
-
-            card.timeout(0)
-            card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
-            try:
-                while True:
-                    time.sleep(0.2)
-            except KeyboardInterrupt:
-                pass
-            finally:
-                card.stop()
-    except spcm.SpcmException as exc:
-        print(f"Could not open Spectrum card (skipping upload): {exc}")
-        return
+        card.timeout(0)
+        card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
+        try:
+            while True:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            card.stop()
 
 
 if __name__ == "__main__":

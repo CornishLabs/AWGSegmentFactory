@@ -82,7 +82,7 @@ class TestSampleCompile(unittest.TestCase):
             compile_sequence_program(
                 q,
                 physical_setup=_identity_setup(q.logical_channels),
-                gain=1.0,
+                full_scale_mv=1.0,
                 clip=1.0,
                 full_scale=20000,
                 output="cupy",
@@ -159,14 +159,14 @@ class TestSampleCompile(unittest.TestCase):
         prog_continue = compile_sequence_program(
             q_continue,
             physical_setup=_identity_setup(q_continue.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_manual = compile_sequence_program(
             q_manual,
             physical_setup=_identity_setup(q_manual.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
@@ -272,14 +272,14 @@ class TestSampleCompile(unittest.TestCase):
         prog_continue = compile_sequence_program(
             q_continue,
             physical_setup=_identity_setup(q_continue.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_manual = compile_sequence_program(
             q_manual,
             physical_setup=_identity_setup(q_manual.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
@@ -337,7 +337,7 @@ class TestSampleCompile(unittest.TestCase):
         prog = compile_sequence_program(
             q,
             physical_setup=_identity_setup(q.logical_channels),
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=20000,
         )
@@ -382,14 +382,14 @@ class TestSampleCompile(unittest.TestCase):
         prog_uncal = compile_sequence_program(
             q,
             physical_setup=setup_uncal,
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
         prog_cal = compile_sequence_program(
             q,
             physical_setup=setup_cal,
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
@@ -462,7 +462,7 @@ class TestSampleCompile(unittest.TestCase):
             compile_sequence_program(
                 q,
                 physical_setup=setup_cal,
-                gain=1.0,
+                full_scale_mv=1.0,
                 clip=1.0,
                 full_scale=20000,
             )

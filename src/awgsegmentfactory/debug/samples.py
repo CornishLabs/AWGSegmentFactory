@@ -145,8 +145,8 @@ def sequence_samples_debug(
     physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     wait_trig_loops: int = 3,
     include_wrap_preview: bool = True,
-    gain: float = 1.0,
-    clip: float = 0.9,
+    full_scale_mv: float = 1.0,
+    clip: float = 1.0,
     full_scale: int = 32767,
     channels: Optional[Sequence[int]] = None,
     window_samples: Optional[int] = None,
@@ -184,7 +184,7 @@ def sequence_samples_debug(
 
     If `program` is `ResolvedIR`/`QuantizedIR` and `physical_setup` is omitted,
     an identity mapping is used (`logical_channels` in order -> hardware 0..N-1).
-    If synthesized amplitudes are in mV, use `gain = 1.0 / card_max_mV`.
+    `full_scale_mv` is the AWG output voltage (mV) that maps to `full_scale`.
     """
     try:
         import matplotlib.pyplot as plt
@@ -209,9 +209,9 @@ def sequence_samples_debug(
         compiled = compile_sequence_program(
             program,
             physical_setup=setup,
-            gain=gain,
-            clip=clip,
+            full_scale_mv=full_scale_mv,
             full_scale=full_scale,
+            clip=clip,
         )
     else:
         quantized = quantize_resolved_ir(
@@ -224,9 +224,9 @@ def sequence_samples_debug(
         compiled = compile_sequence_program(
             quantized,
             physical_setup=setup,
-            gain=gain,
-            clip=clip,
+            full_scale_mv=full_scale_mv,
             full_scale=full_scale,
+            clip=clip,
         )
     need_params = bool(show_param_traces) or bool(show_spot_grid)
     if need_params and q_ir is None:

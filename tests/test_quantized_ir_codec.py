@@ -71,14 +71,14 @@ class TestQuantizedIRCodec(unittest.TestCase):
         c0 = compile_sequence_program(
             q,
             physical_setup=physical_setup,
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=0.9,
             full_scale=32767,
         )
         c1 = compile_sequence_program(
             q2,
             physical_setup=physical_setup,
-            gain=1.0,
+            full_scale_mv=1.0,
             clip=0.9,
             full_scale=32767,
         )

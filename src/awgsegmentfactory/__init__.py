@@ -17,7 +17,7 @@ from .synth_samples import (
     compiled_sequence_program_to_numpy,
     synthesize_sequence_program,
     synthesized_sequence_program_to_numpy,
-    quantize_synthesized_program,
+    quantise_and_normalise_voltage_for_awg,
 )
 from .quantize import (
     QuantizedIR,
@@ -43,7 +43,7 @@ __all__ = [
     "SynthesizedSequenceProgram",
     "compile_sequence_program",
     "synthesize_sequence_program",
-    "quantize_synthesized_program",
+    "quantise_and_normalise_voltage_for_awg",
     "compiled_sequence_program_to_numpy",
     "synthesized_sequence_program_to_numpy",
     "upload_sequence_program",

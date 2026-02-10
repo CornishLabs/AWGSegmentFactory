@@ -33,8 +33,8 @@ def compile_builder_pipeline_timed(
     *,
     sample_rate_hz: float,
     physical_setup: Optional[AWGPhysicalSetupInfo] = None,
-    gain: float = 1.0,
-    clip: float = 0.9,
+    full_scale_mv: float = 1.0,
+    clip: float = 1.0,
     full_scale: int = 32767,
     gpu: bool = False,
 ) -> tuple[CompiledSequenceProgram, PipelineTimings]:
@@ -43,7 +43,7 @@ def compile_builder_pipeline_timed(
     returning both the compiled program and per-stage wall-clock timings.
 
     If `physical_setup` is omitted, an identity logical->hardware mapping is used.
-    If synthesized amplitudes are in mV, use `gain = 1.0 / card_max_mV`.
+    `full_scale_mv` is the AWG output voltage (mV) that maps to `full_scale`.
     """
     t0 = perf_counter()
     intent = builder.build_intent_ir()
@@ -69,9 +69,9 @@ def compile_builder_pipeline_timed(
     compiled = compile_sequence_program(
         quantized,
         physical_setup=setup,
-        gain=gain,
-        clip=clip,
+        full_scale_mv=full_scale_mv,
         full_scale=full_scale,
+        clip=clip,
         gpu=gpu,
     )
     if gpu:
@@ -103,8 +103,8 @@ def benchmark_builder_pipeline(
     physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     iters: int = 5,
     warmup: int = 1,
-    gain: float = 1.0,
-    clip: float = 0.9,
+    full_scale_mv: float = 1.0,
+    clip: float = 1.0,
     full_scale: int = 32767,
     gpu: bool = False,
 ) -> tuple[PipelineTimings, ...]:
@@ -128,9 +128,9 @@ def benchmark_builder_pipeline(
             builder,
             sample_rate_hz=sample_rate_hz,
             physical_setup=physical_setup,
-            gain=gain,
-            clip=clip,
+            full_scale_mv=full_scale_mv,
             full_scale=full_scale,
+            clip=clip,
             gpu=gpu,
         )
         if i >= warmup:
