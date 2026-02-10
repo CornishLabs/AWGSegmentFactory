@@ -74,7 +74,7 @@ def _fit_calibration_file_to_sin2(
     amp_scale = suggest_amp_scale_from_curves(curves)
     rf_amp_max_mV = 1.0 / float(amp_scale)
 
-    calib = fit.to_aod_sin2_calib(g_key="*", amp_scale=float(amp_scale))
+    calib = fit.to_aod_sin2_calib(amp_scale=float(amp_scale))
     return calib, fit, rf_amp_max_mV
 
 

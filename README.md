@@ -127,18 +127,20 @@ IR are treated as *desired optical power* (arbitrary units), and sample synthesi
 to the RF synthesis amplitudes actually used for sample generation.
 
 Built-in calibrations (see `src/awgsegmentfactory/calibration.py`):
-- `AODSin2Calib`: `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (vendor-style saturation; invertible on the first lobe).
+- `AODSin2Calib`: single-channel sin² model,
+  `optical_power ≈ g(freq) * sin^2((π/2) * rf_amp / v0(freq))` (invertible on the first lobe).
+- `MultiChannelAODSin2Calib`: maps logical channel names to physical channel indices and dispatches to per-channel `AODSin2Calib` objects.
   - Small-signal limit: `sin(z)≈z`, so `optical_power ≈ g * ((π/2) * rf_amp / v0)^2` (square-law).
 
 Typical workflow:
 1) Record calibration data from your setup (either per-frequency `DE vs RF amplitude` curves or iso-power `(freq, amp)` points).
-2) Fit an `AODSin2Calib` and save/import the constants in your experiment code.
-3) Pass the calibration at compile time via `compile_sequence_program(..., optical_power_calib=calib)`.
+2) Fit one `AODSin2Calib` per physical channel.
+3) Optionally wrap them in `MultiChannelAODSin2Calib` and pass via
+   `compile_sequence_program(..., optical_power_calib=calib)`.
 
 Examples:
 - `examples/optical_power_calibration_demo.py` (toy sin² model, with/without calibration overlay)
 - `examples/fit_optical_power_calibration.py` (fit `AODSin2Calib` from a calibration file and print a Python constant)
-- `examples/fit_all_calibrations_in_examples.py` (fit all files in `examples/calibrations/` and write `examples/calibrations/sin2_calibration_constants.py`)
 - `examples/sequence_samples_debug_sin2_calib.py` (fit sin² from file, compile with calibration, and debug samples)
 
 ## Compilation stages (mental model)
@@ -156,7 +158,7 @@ flowchart LR
     R -- quantize_resolved_ir --> Q
     Q -- compile_sequence_program --> C
 
-    CAL[Calibrations: AODSin2Calib] --> C
+    CAL[Calibrations: AODSin2Calib / MultiChannelAODSin2Calib] --> C
 
     R -- to_timeline --> TL[ResolvedTimeline]
     Q -- debug --> DBG[sequence_samples_debug]

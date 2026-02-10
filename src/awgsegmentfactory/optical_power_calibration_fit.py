@@ -338,18 +338,14 @@ class Sin2PolyFitResult:
     def to_aod_sin2_calib(
         self,
         *,
-        g_key: str = "*",
-        v0_key: str | None = None,
         amp_scale: float,
         min_g: float = 1e-12,
         y_eps: float = 1e-6,
     ) -> AODSin2Calib:
         """Build an `AODSin2Calib` suitable for the synthesis pipeline."""
-        if v0_key is None:
-            v0_key = g_key
         return AODSin2Calib(
-            g_poly_by_logical_channel={str(g_key): tuple(float(x) for x in self.coeffs_g_high_to_low)},
-            v0_a_poly_by_logical_channel={str(v0_key): tuple(float(x) for x in self.coeffs_v0_a_high_to_low)},
+            g_poly_high_to_low=tuple(float(x) for x in self.coeffs_g_high_to_low),
+            v0_a_poly_high_to_low=tuple(float(x) for x in self.coeffs_v0_a_high_to_low),
             freq_mid_hz=float(self.freq_mid_hz),
             freq_halfspan_hz=float(self.freq_halfspan_hz),
             amp_scale=float(amp_scale),
@@ -661,57 +657,22 @@ def fit_sin2_poly_model_by_logical_channel(
     return fits, float(first.freq_mid_hz), float(first.freq_halfspan_hz)
 
 
-def build_aod_sin2_calib_from_fits(
-    fits_by_logical_channel: Mapping[str, Sin2PolyFitResult],
+def build_aod_sin2_calib_from_fit(
+    fit: Sin2PolyFitResult,
     *,
     amp_scale: float,
     min_g: float = 1e-12,
     y_eps: float = 1e-6,
-    atol_freq_norm_hz: float = 1e-6,
-    atol_min_v0_sq_mV2: float = 0.0,
 ) -> AODSin2Calib:
-    """Build a single `AODSin2Calib` from per-channel fit results."""
-    if not fits_by_logical_channel:
-        raise ValueError("fits_by_logical_channel is empty")
-
-    first = next(iter(fits_by_logical_channel.values()))
-    mid = float(first.freq_mid_hz)
-    halfspan = float(first.freq_halfspan_hz)
-    min_v0_sq = float(first.min_v0_sq_mV2)
-
-    g_poly: Dict[str, Tuple[float, ...]] = {}
-    v0_poly: Dict[str, Tuple[float, ...]] = {}
-    for lc, fit in fits_by_logical_channel.items():
-        if not np.isclose(float(fit.freq_mid_hz), mid, rtol=0.0, atol=float(atol_freq_norm_hz)):
-            raise ValueError(
-                f"freq_mid_hz mismatch for {lc!r}: {fit.freq_mid_hz} vs {mid} "
-                "(fit channels with shared_freq_norm=True to combine)"
-            )
-        if not np.isclose(
-            float(fit.freq_halfspan_hz), halfspan, rtol=0.0, atol=float(atol_freq_norm_hz)
-        ):
-            raise ValueError(
-                f"freq_halfspan_hz mismatch for {lc!r}: {fit.freq_halfspan_hz} vs {halfspan} "
-                "(fit channels with shared_freq_norm=True to combine)"
-            )
-        if not np.isclose(
-            float(fit.min_v0_sq_mV2), min_v0_sq, rtol=0.0, atol=float(atol_min_v0_sq_mV2)
-        ):
-            raise ValueError(
-                f"min_v0_sq_mV2 mismatch for {lc!r}: {fit.min_v0_sq_mV2} vs {min_v0_sq}"
-            )
-
-        g_poly[str(lc)] = tuple(float(x) for x in fit.coeffs_g_high_to_low)
-        v0_poly[str(lc)] = tuple(float(x) for x in fit.coeffs_v0_a_high_to_low)
-
+    """Build a single-channel `AODSin2Calib` from one fit result."""
     return AODSin2Calib(
-        g_poly_by_logical_channel=g_poly,
-        v0_a_poly_by_logical_channel=v0_poly,
-        freq_mid_hz=mid,
-        freq_halfspan_hz=halfspan,
+        g_poly_high_to_low=tuple(float(x) for x in fit.coeffs_g_high_to_low),
+        v0_a_poly_high_to_low=tuple(float(x) for x in fit.coeffs_v0_a_high_to_low),
+        freq_mid_hz=float(fit.freq_mid_hz),
+        freq_halfspan_hz=float(fit.freq_halfspan_hz),
         amp_scale=float(amp_scale),
         min_g=float(min_g),
-        min_v0_sq=float(min_v0_sq),
+        min_v0_sq=float(fit.min_v0_sq_mV2),
         y_eps=float(y_eps),
     )
 
@@ -726,22 +687,11 @@ def aod_sin2_calib_to_python(
         suffix = "," if len(vv) == 1 else ""
         return "(" + ", ".join(f"{v:.16g}" for v in vv) + suffix + ")"
 
-    g_lines = []
-    for k in sorted(calib.g_poly_by_logical_channel.keys()):
-        g_lines.append(f"        {k!r}: {_fmt_tuple(calib.g_poly_by_logical_channel[k])},")
-    v_lines = []
-    for k in sorted(calib.v0_a_poly_by_logical_channel.keys()):
-        v_lines.append(f"        {k!r}: {_fmt_tuple(calib.v0_a_poly_by_logical_channel[k])},")
-
     return "\n".join(
         [
             f"{var_name} = AODSin2Calib(",
-            "    g_poly_by_logical_channel={",
-            *g_lines,
-            "    },",
-            "    v0_a_poly_by_logical_channel={",
-            *v_lines,
-            "    },",
+            f"    g_poly_high_to_low={_fmt_tuple(calib.g_poly_high_to_low)},",
+            f"    v0_a_poly_high_to_low={_fmt_tuple(calib.v0_a_poly_high_to_low)},",
             f"    freq_mid_hz={float(calib.freq_mid_hz):.16g},",
             f"    freq_halfspan_hz={float(calib.freq_halfspan_hz):.16g},",
             f"    amp_scale={float(calib.amp_scale):.16g},",
