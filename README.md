@@ -133,8 +133,16 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 
 This repo includes working Spectrum examples under `examples/spcm/` (sequence mode, triggers, etc).
 Install the optional dependency group first: `uv sync --extra control-hardware`
-The library function `upload_sequence_program(...)` is a placeholder for a future stable API; today it raises
-`NotImplementedError` for CPU upload and points at `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
+
+`upload_sequence_program(...)` supports CPU upload when you pass an open `spcm.Card`:
+
+- full upload:
+  - `session = upload_sequence_program(compiled, mode="cpu", card=card)`
+- data-only update (same segment lengths + same step graph):
+  - `upload_sequence_program(compiled_new, mode="cpu", card=card, cpu_session=session, segment_indices=[k])`
+
+For connection/configuration flow, see `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
+For one-segment data hot-swap, see `examples/spcm/6_awgsegmentfactory_segment_hotswap.py`.
 
 ## Optical-power calibration (optional)
 

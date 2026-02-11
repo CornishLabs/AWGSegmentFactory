@@ -16,9 +16,10 @@ from awgsegmentfactory import (
     quantise_and_normalise_voltage_for_awg,
     quantize_resolved_ir,
     synthesize_sequence_program,
+    upload_sequence_program,
 )
 
-from common import print_quantization_report, setup_spcm_sequence_from_compiled
+from common import print_quantization_report
 
 
 def _build_demo_program(
@@ -59,13 +60,15 @@ def _build_demo_program(
 
 def main() -> None:
     sample_rate_hz = 625e6
-    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 
     ir = _build_demo_program(sample_rate_hz=sample_rate_hz)
     q = quantize_resolved_ir(
         ir,
         segment_quantum_s=4e-6
     )
+
+    physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
+    
     synthesized = synthesize_sequence_program(
         q,
         physical_setup=physical_setup,
@@ -113,8 +116,7 @@ def main() -> None:
         print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
         print_quantization_report(compiled)
 
-        sequence = spcm.Sequence(card)
-        setup_spcm_sequence_from_compiled(sequence, compiled)
+        _session = upload_sequence_program(compiled, mode="cpu", card=card)
         print("sequence written; starting card (Ctrl+C to stop)")
 
         card.timeout(0)

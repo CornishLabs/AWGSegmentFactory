@@ -24,9 +24,10 @@ from awgsegmentfactory import (
     quantise_and_normalise_voltage_for_awg,
     quantize_resolved_ir,
     synthesize_sequence_program,
+    upload_sequence_program,
 )
 
-from common import print_quantization_report, setup_spcm_sequence_from_compiled
+from common import print_quantization_report
 
 
 def _build_dc_pulse_program(
@@ -142,8 +143,7 @@ def main() -> None:
             "- 'pulse_high' then wraps back to 'wait_low' automatically.\n"
         )
 
-        sequence = spcm.Sequence(card)
-        setup_spcm_sequence_from_compiled(sequence, compiled)
+        _session = upload_sequence_program(compiled, mode="cpu", card=card)
         print("sequence written; starting card (Ctrl+C to stop)")
 
         card.timeout(0)
