@@ -267,28 +267,29 @@ Examples:
 
 ```mermaid
 flowchart LR
-    builder["AWGProgramBuilder"];
-    intent["IntentIR"];
-    resolved["ResolvedIR"];
-    quantised["QuantizedIR"];
-    setup["AWGPhysicalSetupInfo (logical map + optional AODSin2Calib)"];
-    compiler["QIRtoSamplesSegmentCompiler"];
-    compiled["Compiled segment slots + steps"];
-    timeline["ResolvedTimeline"];
-    debug["sequence_samples_debug"];
+    builder["AWGProgramBuilder"]
+    intent["IntentIR"]
+    resolved["ResolvedIR"]
+    quantised["QuantizedIR"]
+    setup["AWGPhysicalSetupInfo (logical map + optional AODSin2Calib)"]
+    compiler["QIRtoSamplesSegmentCompiler"]
+    compiled["Compiled segment slots + steps"]
+    timeline["ResolvedTimeline"]
+    debug["sequence_samples_debug"]
 
-    builder -->|build_intent_ir()| intent;
-    intent -->|resolve_intent_ir(intent, sample_rate_hz)| resolved;
-    resolved -->|quantize_resolved_ir(resolved, segment_quantum_s, step_samples)| quantised;
+    builder -->|"build_intent_ir()"| intent
+    intent -->|"resolve_intent_ir(intent, sample_rate_hz)"| resolved
+    resolved -->|"quantize_resolved_ir(resolved, segment_quantum_s, step_samples)"| quantised
 
-    setup -->|physical_setup| compiler;
-    setup -->|physical_setup| compiled;
-    quantised -->|initialise_from_quantised(quantised, physical_setup, full_scale_mv, full_scale, clip)| compiler;
-    compiler -->|compile(segment_indices, segment_names, phase_seed, gpu, output)| compiled;
-    quantised -->|compile_sequence_program(quantised, physical_setup, full_scale_mv, full_scale, clip, gpu, output)| compiled;
+    setup -->|"physical_setup"| compiler
+    setup -->|"physical_setup"| compiled
+    quantised -->|"initialise_from_quantised(quantised, physical_setup, full_scale_mv, full_scale, clip)"| compiler
+    compiler -->|"compile(segment_indices, segment_names, phase_seed, gpu, output)"| compiled
+    quantised -->|"compile_sequence_program(quantised, physical_setup, full_scale_mv, full_scale, clip, gpu, output)"| compiled
 
-    resolved -->|to_timeline()| timeline;
-    quantised -->|debug helpers| debug;
+    resolved -->|"to_timeline()"| timeline
+    quantised -->|"debug helpers"| debug
+
 ```
 
 1) **Build (intent)** (`src/awgsegmentfactory/builder.py`)
