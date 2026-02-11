@@ -37,6 +37,15 @@ To run Spectrum hardware-control examples, install the optional extra:
 uv sync --dev --extra control-hardware
 ```
 
+To run GPU synthesis, install the optional CUDA/CuPy extra:
+```
+uv sync --dev --extra cuda
+```
+Notes:
+- This installs `cupy-cuda13x` (large binary dependency).
+- Your NVIDIA driver/CUDA runtime must be compatible with the CuPy build.
+- If you only use CPU compilation/upload, you do not need this extra.
+
 ## Quick start
 
 ### 1) Build a program (builder → IR)
@@ -70,7 +79,7 @@ print(ir.duration_s, "seconds")
 ```python
 from awgsegmentfactory import (
     AWGPhysicalSetupInfo,
-    compile_sequence_program,
+    QIRtoSamplesSegmentCompiler,
     quantize_resolved_ir,
 )
 
@@ -80,16 +89,21 @@ quantised = quantize_resolved_ir(
 physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 card_max_mV = 450.0  # match your AWG channel amplitude setting
 
-compiled = compile_sequence_program(
-    quantised,
+slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+    quantised=quantised,
     physical_setup=physical_setup,
     full_scale_mv=card_max_mV,
     full_scale=32767,
 )
+slots_compiler.compile()
 
-print("segments:", len(compiled.segments))
-print("steps:", len(compiled.steps))
+print("segments:", len(slots_compiler.segments))
+print("steps:", len(slots_compiler.steps))
 ```
+
+`compile_sequence_program(...)` is a convenience wrapper around:
+- `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
+- `repo.compile(...)`
 
 ### GPU synthesis (optional)
 
@@ -98,11 +112,13 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
 - `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
-  - To convert back to NumPy, use `repo.to_numpy()`.
+  - To convert back to NumPy, use `slots_compiler.to_numpy()`.
 
 For explicit slot control (including partial recompile/hot-swap):
 - `repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
 - `repo.compile()` for all segments, or `repo.compile(segment_indices=[k])` for one segment.
+- `repo.compile(gpu=True, output="cupy")` keeps compiled buffers on GPU.
+- `repo.compile(gpu=True, output="numpy")` compiles on GPU and returns NumPy buffers.
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -139,9 +155,9 @@ Install the optional dependency group first: `uv sync --extra control-hardware`
 `upload_sequence_program(...)` supports CPU upload when you pass an open `spcm.Card`:
 
 - full upload:
-  - `session = upload_sequence_program(repo, mode="cpu", card=card, upload_steps=True)`
+  - `session = upload_sequence_program(slots_compiler, mode="cpu", card=card, upload_steps=True)`
 - data-only update (same segment lengths + same step graph):
-  - `upload_sequence_program(repo, mode="cpu", card=card, cpu_session=session, segment_indices=[k], upload_steps=False)`
+  - `upload_sequence_program(slots_compiler, mode="cpu", card=card, cpu_session=session, segment_indices=[k], upload_steps=False)`
 
 For connection/configuration flow, see `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
 For one-segment data hot-swap, see `examples/spcm/6_awgsegmentfactory_segment_hotswap.py`.
@@ -255,17 +271,22 @@ flowchart LR
     I[IntentIR]
     R[ResolvedIR]
     Q[QuantizedIR]
-    C[QIRtoSamplesSegmentCompiler]
+    P[AWGPhysicalSetupInfo<br/>logical map + optional AODSin2Calib]
+    C0[QIRtoSamplesSegmentCompiler]
+    C1[Compiled segment slots + steps]
 
-    B -- build_intent_ir --> I
-    I -- resolve_intent_ir --> R
-    R -- quantize_resolved_ir --> Q
-    Q -- compile_sequence_program --> C
+    B -->|build_intent_ir()| I
+    I -->|resolve_intent_ir(intent, sample_rate_hz)| R
+    R -->|quantize_resolved_ir(resolved, segment_quantum_s, step_samples)| Q
 
-    CAL[Calibrations: AODSin2Calib / AWGPhysicalSetupInfo] --> C
+    Q -->|initialise_from_quantised(quantised, physical_setup, full_scale_mv, full_scale, clip)| C0
+    C0 -->|compile(segment_indices, segment_names, phase_seed, gpu, output)| C1
+    Q -->|compile_sequence_program(quantised, physical_setup, full_scale_mv, full_scale, clip, gpu, output)| C1
+    P -->|passed as physical_setup| C0
+    P -->|passed as physical_setup| C1
 
-    R -- to_timeline --> TL[ResolvedTimeline]
-    Q -- debug --> DBG[sequence_samples_debug]
+    R -->|to_timeline()| TL[ResolvedTimeline]
+    Q -->|debug helpers| DBG[sequence_samples_debug]
 ```
 
 1) **Build (intent)** (`src/awgsegmentfactory/builder.py`)
