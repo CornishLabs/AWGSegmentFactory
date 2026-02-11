@@ -757,9 +757,6 @@ class QIRtoSamplesSegmentCompiler:
                     phases_rad=phase_out_np,
                 )
 
-            if cp is not None and output == "numpy":
-                data = cp.asnumpy(data)
-
             out.append(
                 CompiledVoltageSegment(
                     segment_index=idx,
@@ -883,13 +880,23 @@ class QIRtoSamplesSegmentCompiler:
             segment_indices=segment_indices,
             segment_names=segment_names,
         )
-        voltage_segments, _phase_out_by_index, _cp = self._synthesise_voltage_segments(
+        voltage_segments, _phase_out_by_index, cp = self._synthesise_voltage_segments(
             idxs=idxs,
             phase_seed=phase_seed,
             require_phase_seed_for_continue=require_phase_seed_for_continue,
             gpu=gpu,
             output=output,
         )
+        if cp is not None and output == "numpy":
+            return tuple(
+                CompiledVoltageSegment(
+                    segment_index=seg.segment_index,
+                    name=seg.name,
+                    n_samples=seg.n_samples,
+                    data_mV=cp.asnumpy(seg.data_mV),
+                )
+                for seg in voltage_segments
+            )
         return voltage_segments
 
     def to_numpy(self) -> "QIRtoSamplesSegmentCompiler":
