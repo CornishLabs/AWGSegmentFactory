@@ -459,6 +459,9 @@ class QIRtoSamplesSegmentCompiler:
     Notes:
     - Segment selection is intentionally restricted to a contiguous index run to keep
       phase continuity handling explicit and deterministic.
+    - Partial compile mutates this object in-place and marks downstream segments as
+      stale (`None`) because their predecessor-dependent phase assumptions may no longer
+      be valid.
     - If selected segments use `phase_mode="continue"` and require predecessor phase
       state, compile either:
         - with predecessor segments already compiled in this repo, or
@@ -677,6 +680,10 @@ class QIRtoSamplesSegmentCompiler:
         require_phase_seed_for_continue:
             If True (default), compiling a non-initial `continue` segment without a
             known predecessor phase state raises.
+        Footgun:
+            If segment `k` is recompiled and segment `k+1` uses `phase_mode="continue"`,
+            you should generally recompile `k+1` too (or a contiguous suffix `k..end`)
+            before upload, otherwise `k+1` may carry stale predecessor assumptions.
         gpu / output:
             Same semantics as the old compile API:
             - `gpu=False`: CPU synthesis + quantisation.

@@ -227,6 +227,8 @@ def upload_sequence_program(
         - True (default): full upload of all segments + step graph (`sequence.write_setup()`).
           Requires all segments compiled.
         - False: data-only segment update using existing `cpu_session`.
+          Footgun: use this only when segment lengths and step graph are unchanged.
+          It rewrites sample data only.
 
     Returns
     -------

@@ -120,6 +120,8 @@ Notes:
   timeline `ResolvedIR.to_timeline()` shows pre-optimised phases.
 - `.define(..., phases="auto")` currently means "all zeros"; this is typically fine when using
   `phase_mode="optimise"`/`"continue"`.
+- If you are doing partial recompiles/hot-swap, `phase_mode="continue"` requires extra care
+  because start phase depends on predecessor segment state.
 
 ### 3) Debug helpers (optional)
 
@@ -143,6 +145,26 @@ Install the optional dependency group first: `uv sync --extra control-hardware`
 
 For connection/configuration flow, see `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
 For one-segment data hot-swap, see `examples/spcm/6_awgsegmentfactory_segment_hotswap.py`.
+
+### Hot-swap Footguns
+
+When using data-only updates (`upload_steps=False`), keep these constraints in mind:
+
+- Sequence structure must stay fixed:
+  - same segment count,
+  - same segment lengths,
+  - same step transition graph.
+  If any of these change, do a full upload (`upload_steps=True`).
+- Data-only hot-swap is for sample content updates, not graph/topology edits.
+- `phase_mode="continue"` is the main trap for partial recompiles:
+  - segment `k` start phase depends on segment `k-1` end phase,
+  - segment `k+1` may depend on segment `k`.
+  If you recompile only `k` and leave `k+1` stale, boundary continuity assumptions can be wrong.
+- Safe patterns for hot-swap:
+  - use `phase_mode="manual"` for the hot-swapped segment(s), or
+  - recompile and re-upload a contiguous suffix `k..end` when using `continue`.
+- If you change tone count/frequencies on a hot-swapped segment, tone matching for
+  `continue` can change. Treat this as a higher-risk edit and prefer recompiling a suffix.
 
 ## Optical-power calibration (optional)
 

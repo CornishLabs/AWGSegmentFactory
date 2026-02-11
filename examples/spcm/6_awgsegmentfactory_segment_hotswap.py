@@ -6,6 +6,13 @@ Flow:
 2) On keyboard command, recompile one segment with a new random DC ramp.
 3) Upload only that segment's sample data (step graph unchanged).
 4) After a short delay, issue a software trigger.
+
+Hot-swap safety note:
+- This demo keeps the hot-swapped segment in `phase_mode="manual"` so partial
+  recompile is local and deterministic.
+- For general multitone sequences with `phase_mode="continue"`, recompiling one
+  segment can invalidate predecessor/successor continuity assumptions. Recompile
+  a contiguous suffix when in doubt.
 """
 
 from __future__ import annotations
@@ -62,7 +69,8 @@ def _build_hotswap_program(
     b.tones("H").use_def("dc_low")
     b.hold(time=20e-6)
 
-    b.segment("ramp", mode="once",phase_mode="manual")
+    # Keep this segment manual so one-segment recompile does not depend on predecessor phase state.
+    b.segment("ramp", mode="once", phase_mode="manual")
     b.tones("H").use_def("dc_ramp_start")
     b.tones("H").ramp_amp_to(
         amps=[ramp_end_mv],
