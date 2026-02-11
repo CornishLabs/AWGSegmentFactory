@@ -62,6 +62,15 @@ class _PhaseContinueState:
     phases_rad: np.ndarray
 
 
+@dataclass(frozen=True)
+class _ChannelSynthesisBinding:
+    """Pre-resolved per-logical-channel synthesis routing/calibration."""
+
+    logical_channel: str
+    hardware_channel: int
+    amp_calib: Optional[OpticalPowerToRFAmpCalib]
+
+
 def _match_tones_by_frequency(
     prev_freqs_hz: np.ndarray,
     cur_freqs_hz: np.ndarray,
@@ -293,7 +302,7 @@ def _synth_part(
     amp_calib: Optional[OpticalPowerToRFAmpCalib],
     xp: Any = np,
 ) -> tuple[Any, Any]:
-    """Synthesize one logical-channel part."""
+    """Synthesize one logical-channel part using a channel-specific calibration."""
     freqs, amps = interp_logical_channel_part(
         pp, n_samples=n_samples, sample_rate_hz=sample_rate_hz, xp=xp
     )
@@ -651,6 +660,24 @@ class QIRtoSamplesSegmentCompiler:
             return None
         return prev_seed.get(logical_channel)
 
+    def _channel_bindings(self) -> tuple[_ChannelSynthesisBinding, ...]:
+        """
+        Resolve per-channel routing/calibration once for the current physical setup.
+        """
+        out: list[_ChannelSynthesisBinding] = []
+        q_ir = self.quantised.resolved_ir
+        for logical_channel in q_ir.logical_channels:
+            hw_ch = int(self.physical_setup.hardware_channel(logical_channel))
+            amp_calib = self.physical_setup.channel_calibrations[hw_ch]
+            out.append(
+                _ChannelSynthesisBinding(
+                    logical_channel=logical_channel,
+                    hardware_channel=hw_ch,
+                    amp_calib=amp_calib,
+                )
+            )
+        return tuple(out)
+
     def _synthesise_voltage_segments(
         self,
         *,
@@ -672,7 +699,7 @@ class QIRtoSamplesSegmentCompiler:
             xp = cp
 
         q_ir = self.quantised.resolved_ir
-        amp_calib: Optional[OpticalPowerToRFAmpCalib] = self.physical_setup
+        channel_bindings = self._channel_bindings()
         n_channels = int(self.physical_setup.N_ch)
 
         out: list[CompiledVoltageSegment] = []
@@ -686,7 +713,8 @@ class QIRtoSamplesSegmentCompiler:
 
             phase_out_by_channel: dict[str, _PhaseContinueState] = {}
             phase_mode = str(getattr(seg, "phase_mode", "continue"))
-            for logical_channel in q_ir.logical_channels:
+            for binding in channel_bindings:
+                logical_channel = binding.logical_channel
                 phase_in: _PhaseContinueState | None = None
                 if idx > 0 and phase_mode == "continue":
                     prev_run = phase_out_by_index.get(idx - 1)
@@ -706,16 +734,15 @@ class QIRtoSamplesSegmentCompiler:
                             f"segment {idx - 1} already compiled."
                         )
 
-                hw_ch = int(self.physical_setup.hardware_channel(logical_channel))
                 y, phase_out = _synth_logical_channel_segment(
                     seg,
                     logical_channel=logical_channel,
                     sample_rate_hz=q_ir.sample_rate_hz,
                     phase_in=phase_in,
-                    amp_calib=amp_calib,
+                    amp_calib=binding.amp_calib,
                     xp=xp,
                 )
-                data[hw_ch, :] = y
+                data[binding.hardware_channel, :] = y
 
                 if cp is not None:
                     phase_out_np = cp.asnumpy(phase_out)

@@ -32,6 +32,12 @@ uv run --cache-dir .uv-cache examples/recreate_current.py
 uv sync --dev
 ```
 
+If `uv run ...` itself crashes in a constrained sandbox, you can still use the
+same environment directly:
+```
+./.venv/bin/python -m pytest -q
+```
+
 To run Spectrum hardware-control examples, install the optional extra:
 ```
 uv sync --dev --extra control-hardware
