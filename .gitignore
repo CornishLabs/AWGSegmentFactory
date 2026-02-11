@@ -16,3 +16,4 @@ wheels/
 
 # Spectrum spcm driver debug log (may be created when running examples)
 spcmdrv_debug.txt
+ 

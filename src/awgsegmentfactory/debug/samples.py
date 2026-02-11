@@ -7,13 +7,13 @@ sample buffer and render it with segment/repeat boundary markers for inspection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..calibration import AWGPhysicalSetupInfo
+from ..calibration import AWGPhysicalSetupInfo, OpticalPowerToRFAmpCalib
 from ..resolved_ir import ResolvedIR
-from ..synth_samples import QIRtoSamplesSegmentCompiler
+from ..synth_samples import CompiledVoltageSegment, QIRtoSamplesSegmentCompiler
 from ..synth_samples import interp_logical_channel_part
 from ..quantize import QuantizedIR, quantize_resolved_ir
 
@@ -139,6 +139,70 @@ def unroll_compiled_sequence_for_debug(
     return out, tuple(instances)
 
 
+def unroll_voltage_sequence_for_debug(
+    compiled: QIRtoSamplesSegmentCompiler,
+    voltage_segments: Sequence[CompiledVoltageSegment],
+    *,
+    wait_trig_loops: int = 3,
+    include_wrap_preview: bool = True,
+    max_step_transitions: Optional[int] = None,
+) -> tuple[np.ndarray, Tuple[SegmentInstance, ...]]:
+    """
+    Unroll synthesized voltage buffers (mV) into a contiguous debug sample array.
+    """
+    n_channels = int(compiled.physical_setup.N_ch)
+    instances_spec = _iter_instances_for_debug(
+        compiled,
+        wait_trig_loops=wait_trig_loops,
+        include_wrap_preview=include_wrap_preview,
+        max_step_transitions=max_step_transitions,
+    )
+
+    by_index: Dict[int, CompiledVoltageSegment] = {
+        int(seg.segment_index): seg for seg in voltage_segments
+    }
+    if len(by_index) != int(compiled.n_segments):
+        missing = sorted(set(range(int(compiled.n_segments))) - set(by_index.keys()))
+        raise ValueError(
+            "voltage_segments must contain one entry per segment index. "
+            f"Missing indices: {missing}"
+        )
+
+    seg_lens = [int(by_index[i].n_samples) for i in range(int(compiled.n_segments))]
+    total = sum(
+        seg_lens[seg_idx] for _step, seg_idx, _rep, _rep_total, _wrap in instances_spec
+    )
+    out = np.zeros((n_channels, total), dtype=np.float32)
+
+    instances: list[SegmentInstance] = []
+    cursor = 0
+    for step_idx, seg_idx, rep_index, reps_total, is_wrap_preview in instances_spec:
+        seg = by_index[int(seg_idx)]
+        n = int(seg.n_samples)
+        data = np.asarray(seg.data_mV, dtype=np.float32)
+        if data.shape != (n_channels, n):
+            raise ValueError(
+                "Voltage segment shape mismatch while unrolling debug sequence: "
+                f"index={seg_idx} expected {(n_channels, n)} got {tuple(data.shape)}"
+            )
+        out[:, cursor : cursor + n] = data
+        instances.append(
+            SegmentInstance(
+                start_sample=cursor,
+                stop_sample=cursor + n,
+                step_index=step_idx,
+                segment_index=seg_idx,
+                segment_name=str(seg.name),
+                rep_index=rep_index,
+                reps_total=reps_total,
+                is_wrap_preview=is_wrap_preview,
+            )
+        )
+        cursor += n
+
+    return out, tuple(instances)
+
+
 def sequence_samples_debug(
     program: ResolvedIR | QuantizedIR | QIRtoSamplesSegmentCompiler,
     *,
@@ -148,11 +212,13 @@ def sequence_samples_debug(
     full_scale_mv: float = 1.0,
     clip: float = 1.0,
     full_scale: int = 32767,
+    waveform_units: Literal["card_int16", "voltage_mV"] = "card_int16",
     channels: Optional[Sequence[int]] = None,
     window_samples: Optional[int] = None,
     show_slider: Optional[bool] = None,
     show_markers: bool = True,
     show_param_traces: bool = True,
+    amp_trace_kind: Literal["optical", "rf", "both"] = "rf",
     param_channels: Optional[Sequence[int]] = None,
     freq_unit: str = "MHz",
     max_points_wave: int = 20_000,
@@ -169,11 +235,14 @@ def sequence_samples_debug(
     """
     Interactive sample-level debug view with segment boundaries.
 
-    - Plots raw int16 samples per enabled channel (with dynamic downsampling for speed).
+    - Plots per-channel waveform samples (card int16 or synthesized mV) with dynamic
+      downsampling for speed.
     - Draws vertical boundary markers at every segment repetition (including loops):
       solid = transition to a different segment, dashed = repeat of the same segment.
     - Optional per-sample frequency/amplitude traces (if `show_param_traces=True`) are
       rendered on the same unrolled x-axis (including `wait_trig_loops` repeats).
+      `amp_trace_kind` controls whether amplitude traces show optical targets, RF
+      synthesis amplitudes, or both.
     - Optional boundary slider (index into the boundary list) that re-centers the view.
     - Set `window_samples=None` to plot the entire unrolled sequence at once (no slider).
     - Optional 2D spot-grid view (Cartesian product of H/V tones) derived from the same
@@ -184,7 +253,8 @@ def sequence_samples_debug(
 
     If `program` is `ResolvedIR`/`QuantizedIR` and `physical_setup` is omitted,
     an identity mapping is used (`logical_channels` in order -> hardware 0..N-1).
-    `full_scale_mv` is the AWG output voltage (mV) that maps to `full_scale`.
+    `full_scale_mv` is the AWG output voltage (mV) that maps to `full_scale` for
+    `waveform_units="card_int16"`.
     """
     try:
         import matplotlib.pyplot as plt
@@ -196,6 +266,11 @@ def sequence_samples_debug(
         raise ModuleNotFoundError(
             "`sequence_samples_debug` requires matplotlib. Install the `dev` dependency group."
         ) from exc
+
+    if waveform_units not in ("card_int16", "voltage_mV"):
+        raise ValueError("waveform_units must be 'card_int16' or 'voltage_mV'")
+    if amp_trace_kind not in ("optical", "rf", "both"):
+        raise ValueError("amp_trace_kind must be 'optical', 'rf', or 'both'")
 
     compiled: QIRtoSamplesSegmentCompiler
     q_ir: Optional[ResolvedIR] = None
@@ -212,7 +287,7 @@ def sequence_samples_debug(
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
             clip=clip,
-        ).compile_to_card_int16()
+        )
     else:
         quantized = quantize_resolved_ir(
             program,
@@ -227,7 +302,7 @@ def sequence_samples_debug(
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
             clip=clip,
-        ).compile_to_card_int16()
+        )
     need_params = bool(show_param_traces) or bool(show_spot_grid)
     if need_params and q_ir is None:
         raise ValueError(
@@ -235,11 +310,25 @@ def sequence_samples_debug(
             "(not a QIRtoSamplesSegmentCompiler)"
         )
 
-    samples, instances = unroll_compiled_sequence_for_debug(
-        compiled,
-        wait_trig_loops=wait_trig_loops,
-        include_wrap_preview=include_wrap_preview,
-    )
+    if waveform_units == "card_int16":
+        if isinstance(program, QIRtoSamplesSegmentCompiler):
+            if len(compiled.compiled_indices) != int(compiled.n_segments):
+                compiled = compiled.compile_to_card_int16()
+        else:
+            compiled = compiled.compile_to_card_int16()
+        samples, instances = unroll_compiled_sequence_for_debug(
+            compiled,
+            wait_trig_loops=wait_trig_loops,
+            include_wrap_preview=include_wrap_preview,
+        )
+    else:
+        voltage_segments = compiled.compile_to_voltage_mV()
+        samples, instances = unroll_voltage_sequence_for_debug(
+            compiled,
+            voltage_segments,
+            wait_trig_loops=wait_trig_loops,
+            include_wrap_preview=include_wrap_preview,
+        )
     total = int(samples.shape[1])
     full_view = window_samples is None or window_samples >= total
     if not full_view and window_samples <= 0:  # type: ignore[operator]
@@ -277,7 +366,8 @@ def sequence_samples_debug(
     n_param_channels = 0
     if show_param_traces:
         n_param_channels = min(2, len(param_channels))
-    n_param_axes = 2 * n_param_channels
+    n_amp_axes_per_channel = 2 if amp_trace_kind == "both" else 1
+    n_param_axes = (1 + n_amp_axes_per_channel) * n_param_channels
     n_grid_axes = 1 if show_spot_grid else 0
 
     # Vertical stack layout: frequency/amp traces (optional) above waveform channels,
@@ -303,7 +393,7 @@ def sequence_samples_debug(
 
     ax_time_master = None
     ax_param: list = []
-    param_axes: list[tuple[int, object, object]] = []
+    param_axes: list[dict[str, object]] = []
     if show_param_traces and n_param_channels > 0:
         for ch in param_channels[:n_param_channels]:
             if ax_time_master is None:
@@ -312,10 +402,21 @@ def sequence_samples_debug(
             else:
                 ax_f = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
             row += 1
-            ax_a = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
-            row += 1
-            ax_param.extend([ax_f, ax_a])
-            param_axes.append((int(ch), ax_f, ax_a))
+            ax_param.append(ax_f)
+            axes_for_ch: dict[str, object] = {"ch": int(ch), "ax_f": ax_f}
+
+            if amp_trace_kind in ("optical", "both"):
+                ax_a_opt = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
+                row += 1
+                ax_param.append(ax_a_opt)
+                axes_for_ch["ax_a_opt"] = ax_a_opt
+            if amp_trace_kind in ("rf", "both"):
+                ax_a_rf = fig.add_subplot(gs[row, 0], sharex=ax_time_master)
+                row += 1
+                ax_param.append(ax_a_rf)
+                axes_for_ch["ax_a_rf"] = ax_a_rf
+
+            param_axes.append(axes_for_ch)
 
     axs = []
     for i in range(n_wave):
@@ -350,8 +451,10 @@ def sequence_samples_debug(
 
     # Parameter line objects (tone lines). Created lazily on first render.
     param_lines_freq: Dict[int, list] = {}
-    param_lines_amp: Dict[int, list] = {}
-    segment_param_cache: Dict[tuple[int, str], tuple[np.ndarray, np.ndarray]] = {}
+    param_lines_amp: Dict[tuple[int, str], list] = {}
+    segment_param_cache: Dict[
+        tuple[int, str], tuple[np.ndarray, np.ndarray, np.ndarray]
+    ] = {}
     max_tones_cache: Dict[str, int] = {}
 
     def _window_for_boundary(sample_pos: int) -> tuple[int, int]:
@@ -379,6 +482,10 @@ def sequence_samples_debug(
 
         logical_channels = ",".join(sorted(hw_ch_to_logical_channels.get(ch, [])))
         label = f"CH{ch}" + (f" ({logical_channels})" if logical_channels else "")
+        if waveform_units == "card_int16":
+            label += " int16"
+        else:
+            label += " mV"
         ax.set_ylabel(label)
         ax.grid(True, alpha=0.3)
 
@@ -392,10 +499,16 @@ def sequence_samples_debug(
             selected_lines.append(sel)
 
     axs[-1].set_xlabel("Sample index (per-sample)")
-    y_max = float(compiled.clip) * float(compiled.full_scale)
-    if y_max > 0:
-        for ax in axs:
-            ax.set_ylim(-1.05 * y_max, 1.05 * y_max)
+    if waveform_units == "card_int16":
+        y_max = float(compiled.clip) * float(compiled.full_scale)
+        if y_max > 0:
+            for ax in axs:
+                ax.set_ylim(-1.05 * y_max, 1.05 * y_max)
+    else:
+        y_max_mv = float(np.max(np.abs(samples))) if samples.size else 0.0
+        if y_max_mv > 0:
+            for ax in axs:
+                ax.set_ylim(-1.05 * y_max_mv, 1.05 * y_max_mv)
 
     # One selected-boundary line per param axis too (windowed/slider mode only).
     if show_param_traces and not full_view:
@@ -414,13 +527,29 @@ def sequence_samples_debug(
             raise ValueError("freq_unit must be one of: 'Hz', 'kHz', 'MHz', 'GHz'")
         f_scale = {"Hz": 1.0, "kHz": 1e-3, "MHz": 1e-6, "GHz": 1e-9}[freq_unit]
 
-        for idx, (ch, ax_f, ax_a) in enumerate(param_axes):
+        for entry in param_axes:
+            ch = int(entry["ch"])
+            ax_f = entry["ax_f"]
             ax_f.set_ylabel(f"CH{ch} freq ({freq_unit})")
-            ax_a.set_ylabel(f"CH{ch} amp")
             ax_f.grid(True, alpha=0.25)
-            ax_a.grid(True, alpha=0.25)
+            if "ax_a_opt" in entry:
+                ax = entry["ax_a_opt"]
+                ax.set_ylabel(f"CH{ch} amp opt (arb)")
+                ax.grid(True, alpha=0.25)
+            if "ax_a_rf" in entry:
+                ax = entry["ax_a_rf"]
+                ax.set_ylabel(f"CH{ch} amp rf (mV)")
+                ax.grid(True, alpha=0.25)
 
     if need_params:
+        amp_calib_by_logical_channel: Dict[str, Optional[OpticalPowerToRFAmpCalib]] = {}
+        if q_ir is not None:
+            for logical_channel in q_ir.logical_channels:
+                hw_ch = compiled.physical_setup.hardware_channel(logical_channel)
+                amp_calib_by_logical_channel[str(logical_channel)] = (
+                    compiled.physical_setup.channel_calibrations[hw_ch]
+                )
+
         def _param_logical_channel_for_hardware_channel(ch: int) -> Optional[str]:
             logical_channels = sorted(hw_ch_to_logical_channels.get(ch, []))
             return logical_channels[0] if logical_channels else None
@@ -440,7 +569,7 @@ def sequence_samples_debug(
 
         def _segment_params(
             seg_index: int, logical_channel: str
-        ) -> tuple[np.ndarray, np.ndarray]:
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             key = (int(seg_index), logical_channel)
             if key in segment_param_cache:
                 return segment_param_cache[key]
@@ -450,23 +579,42 @@ def sequence_samples_debug(
             n = int(seg.n_samples)
             max_tones = _max_tones_for_logical_channel(logical_channel)
             freqs = np.full((n, max_tones), np.nan, dtype=np.float32)
-            amps = np.full((n, max_tones), np.nan, dtype=np.float32)
+            amps_opt = np.full((n, max_tones), np.nan, dtype=np.float32)
+            amps_rf = np.full((n, max_tones), np.nan, dtype=np.float32)
             cursor = 0
             for part in seg.parts:
                 pp = part.logical_channels[logical_channel]
                 if part.n_samples <= 0:
                     continue
-                f_part, a_part = interp_logical_channel_part(
+                f_part, a_part_opt = interp_logical_channel_part(
                     pp, n_samples=part.n_samples, sample_rate_hz=q_ir.sample_rate_hz
                 )
+                amp_calib = amp_calib_by_logical_channel.get(logical_channel)
+                if amp_calib is not None:
+                    try:
+                        a_part_rf = amp_calib.rf_amps(
+                            f_part,
+                            a_part_opt,
+                            logical_channel=logical_channel,
+                            xp=np,
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "Optical-power calibration failed while building debug "
+                            "parameter traces."
+                        ) from exc
+                else:
+                    a_part_rf = a_part_opt
                 f_part = f_part.astype(np.float32, copy=False)
-                a_part = a_part.astype(np.float32, copy=False)
+                a_part_opt = np.asarray(a_part_opt, dtype=np.float32)
+                a_part_rf = np.asarray(a_part_rf, dtype=np.float32)
                 nt = int(f_part.shape[1])
                 freqs[cursor : cursor + part.n_samples, :nt] = f_part
-                amps[cursor : cursor + part.n_samples, :nt] = a_part
+                amps_opt[cursor : cursor + part.n_samples, :nt] = a_part_opt
+                amps_rf[cursor : cursor + part.n_samples, :nt] = a_part_rf
                 cursor += part.n_samples
-            segment_param_cache[key] = (freqs, amps)
-            return freqs, amps
+            segment_param_cache[key] = (freqs, amps_opt, amps_rf)
+            return freqs, amps_opt, amps_rf
 
     # Fast boundary rendering: one LineCollection per axis for solid + dashed.
     boundary_solid: list[float] = []
@@ -530,20 +678,22 @@ def sequence_samples_debug(
         """Return downsampled (x, y) waveform data for channel `ch` over [x0w, x1w)."""
         n = max(0, int(x1w) - int(x0w))
         if n <= 0:
-            return np.zeros((0,), dtype=int), np.zeros((0,), dtype=np.int16)
+            return np.zeros((0,), dtype=int), np.zeros((0,), dtype=samples.dtype)
         step = _downsample_step(n, max_points=max_points_wave)
         x = np.arange(x0w, x1w, step, dtype=int)
         y = samples[ch, x0w:x1w:step]
         return x, y
 
-    def _params_at(logical_channel: str, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Return (freqs, amps) at global sample indices `x` for one logical channel."""
+    def _params_at(
+        logical_channel: str, x: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return (freqs, amps_optical, amps_rf) at global sample indices `x`."""
         if q_ir is None:
             raise RuntimeError("q_ir missing")
         if x.size == 0:
             max_tones = _max_tones_for_logical_channel(logical_channel)
             z = np.full((0, max_tones), np.nan, dtype=np.float32)
-            return z, z
+            return z, z, z
 
         inst_idx = np.searchsorted(inst_stops, x, side="right")
         inst_idx = np.clip(inst_idx, 0, len(instances) - 1)
@@ -551,16 +701,18 @@ def sequence_samples_debug(
 
         max_tones = _max_tones_for_logical_channel(logical_channel)
         freqs = np.full((x.size, max_tones), np.nan, dtype=np.float32)
-        amps = np.full((x.size, max_tones), np.nan, dtype=np.float32)
+        amps_opt = np.full((x.size, max_tones), np.nan, dtype=np.float32)
+        amps_rf = np.full((x.size, max_tones), np.nan, dtype=np.float32)
 
         for idx in np.unique(inst_idx):
             mask = inst_idx == idx
             seg_index = int(instances[int(idx)].segment_index)
-            seg_freqs, seg_amps = _segment_params(seg_index, logical_channel)
+            seg_freqs, seg_amps_opt, seg_amps_rf = _segment_params(seg_index, logical_channel)
             offs = local[mask]
             freqs[mask, :] = seg_freqs[offs, :]
-            amps[mask, :] = seg_amps[offs, :]
-        return freqs, amps
+            amps_opt[mask, :] = seg_amps_opt[offs, :]
+            amps_rf[mask, :] = seg_amps_rf[offs, :]
+        return freqs, amps_opt, amps_rf
 
     cursor_pos: int = 0
     cursor_lines: list = []
@@ -643,12 +795,12 @@ def sequence_samples_debug(
             sample_idx = int(sample_idx)
             sample_idx = max(0, min(sample_idx, total - 1))
             x = np.array([sample_idx], dtype=int)
-            fH, aH = _params_at(spot_grid_logical_channel_h, x)
-            fV, aV = _params_at(spot_grid_logical_channel_v, x)
+            fH, aH_opt, _aH_rf = _params_at(spot_grid_logical_channel_h, x)
+            fV, aV_opt, _aV_rf = _params_at(spot_grid_logical_channel_v, x)
             fH = fH[0]
-            aH = aH[0]
+            aH = aH_opt[0]
             fV = fV[0]
-            aV = aV[0]
+            aV = aV_opt[0]
 
             mH = np.isfinite(fH) & np.isfinite(aH)
             mV = np.isfinite(fV) & np.isfinite(aV)
@@ -839,32 +991,25 @@ def sequence_samples_debug(
                 step = _downsample_step(n, max_points=max_points_param)
                 x = np.arange(x0w, x1w, step, dtype=int)
                 x_float = x.astype(float, copy=False)
-                for ch, ax_f, ax_a in param_axes:
+                for entry in param_axes:
+                    ch = int(entry["ch"])
                     logical_channel = _param_logical_channel_for_hardware_channel(ch)
                     if logical_channel is None:
                         continue
-                    freqs_w, amps_w = _params_at(logical_channel, x)
+                    ax_f = entry["ax_f"]
+                    freqs_w, amps_opt_w, amps_rf_w = _params_at(logical_channel, x)
                     freqs_plot = freqs_w * f_scale
 
                     lf = param_lines_freq.setdefault(ch, [])
-                    la = param_lines_amp.setdefault(ch, [])
                     nt = int(freqs_plot.shape[1])
                     while len(lf) < nt:
                         (ln,) = ax_f.plot([], [], linewidth=1.0, alpha=0.9)
                         lf.append(ln)
-                    while len(la) < nt:
-                        (ln,) = ax_a.plot([], [], linewidth=1.0, alpha=0.9)
-                        la.append(ln)
-
                     for k in range(nt):
                         lf[k].set_data(x_float, freqs_plot[:, k])
-                        la[k].set_data(x_float, amps_w[:, k])
                         lf[k].set_visible(np.any(np.isfinite(freqs_plot[:, k])))
-                        la[k].set_visible(np.any(np.isfinite(amps_w[:, k])))
                     for k in range(nt, len(lf)):
                         lf[k].set_visible(False)
-                    for k in range(nt, len(la)):
-                        la[k].set_visible(False)
 
                     finite = freqs_plot[np.isfinite(freqs_plot)]
                     if finite.size:
@@ -876,14 +1021,45 @@ def sequence_samples_debug(
                             m = 0.05 * (hi - lo)
                         ax_f.set_ylim(lo - m, hi + m)
 
-                    finite_a = amps_w[np.isfinite(amps_w)]
-                    if finite_a.size:
-                        lo = float(np.min(finite_a))
-                        hi = float(np.max(finite_a))
-                        m = 0.05 * max(abs(lo), abs(hi))
-                        if m == 0.0:
-                            m = 0.05
-                        ax_a.set_ylim(lo - m, hi + m)
+                    if "ax_a_opt" in entry:
+                        ax_a_opt = entry["ax_a_opt"]
+                        la_opt = param_lines_amp.setdefault((ch, "opt"), [])
+                        while len(la_opt) < nt:
+                            (ln,) = ax_a_opt.plot([], [], linewidth=1.0, alpha=0.9)
+                            la_opt.append(ln)
+                        for k in range(nt):
+                            la_opt[k].set_data(x_float, amps_opt_w[:, k])
+                            la_opt[k].set_visible(np.any(np.isfinite(amps_opt_w[:, k])))
+                        for k in range(nt, len(la_opt)):
+                            la_opt[k].set_visible(False)
+                        finite_a = amps_opt_w[np.isfinite(amps_opt_w)]
+                        if finite_a.size:
+                            lo = float(np.min(finite_a))
+                            hi = float(np.max(finite_a))
+                            m = 0.05 * max(abs(lo), abs(hi))
+                            if m == 0.0:
+                                m = 0.05
+                            ax_a_opt.set_ylim(lo - m, hi + m)
+
+                    if "ax_a_rf" in entry:
+                        ax_a_rf = entry["ax_a_rf"]
+                        la_rf = param_lines_amp.setdefault((ch, "rf"), [])
+                        while len(la_rf) < nt:
+                            (ln,) = ax_a_rf.plot([], [], linewidth=1.0, alpha=0.9)
+                            la_rf.append(ln)
+                        for k in range(nt):
+                            la_rf[k].set_data(x_float, amps_rf_w[:, k])
+                            la_rf[k].set_visible(np.any(np.isfinite(amps_rf_w[:, k])))
+                        for k in range(nt, len(la_rf)):
+                            la_rf[k].set_visible(False)
+                        finite_a = amps_rf_w[np.isfinite(amps_rf_w)]
+                        if finite_a.size:
+                            lo = float(np.min(finite_a))
+                            hi = float(np.max(finite_a))
+                            m = 0.05 * max(abs(lo), abs(hi))
+                            if m == 0.0:
+                                m = 0.05
+                            ax_a_rf.set_ylim(lo - m, hi + m)
         finally:
             updating = False
 

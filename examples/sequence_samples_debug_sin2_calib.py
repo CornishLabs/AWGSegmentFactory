@@ -155,6 +155,8 @@ def main() -> None:
         window_samples=None,
         show_slider=False,
         show_markers=True,
+        waveform_units="voltage_mV",
+        amp_trace_kind="both",
         title="Sequence samples (AODSin2Calib compile-time calibration)",
     )
 
