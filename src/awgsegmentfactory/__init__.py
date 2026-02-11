@@ -13,9 +13,9 @@ from .resolve import resolve_intent_ir
 from .synth_samples import (
     QIRtoSamplesSegmentCompiler,
     CompiledSegment,
+    CompiledVoltageSegment,
     SequenceStep,
-    compile_sequence_program,
-    quantise_and_normalise_voltage_for_awg,
+    quantize_voltage_buffer_to_int16,
 )
 from .quantize import (
     QuantizedIR,
@@ -39,9 +39,9 @@ __all__ = [
     "QuantizedIR",
     "QIRtoSamplesSegmentCompiler",
     "CompiledSegment",
+    "CompiledVoltageSegment",
     "SequenceStep",
-    "compile_sequence_program",
-    "quantise_and_normalise_voltage_for_awg",
+    "quantize_voltage_buffer_to_int16",
     "upload_sequence_program",
     "CPUUploadSession",
     "SegmentQuantizationInfo",

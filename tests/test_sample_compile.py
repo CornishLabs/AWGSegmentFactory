@@ -10,7 +10,7 @@ from awgsegmentfactory.resolved_ir import (
     ResolvedPart,
     ResolvedSegment,
 )
-from awgsegmentfactory.synth_samples import compile_sequence_program
+from awgsegmentfactory.synth_samples import QIRtoSamplesSegmentCompiler
 from awgsegmentfactory.quantize import quantize_resolved_ir
 from awgsegmentfactory.resolved_timeline import LogicalChannelState
 
@@ -25,6 +25,25 @@ def _empty_logical_channel_state() -> LogicalChannelState:
 
 def _identity_setup(logical_channels: tuple[str, ...]) -> AWGPhysicalSetupInfo:
     return AWGPhysicalSetupInfo.identity(logical_channels)
+
+
+def _compile_to_card(
+    q,
+    *,
+    physical_setup: AWGPhysicalSetupInfo,
+    full_scale_mv: float,
+    clip: float,
+    full_scale: int,
+    gpu: bool = False,
+    output: str = "numpy",
+) -> QIRtoSamplesSegmentCompiler:
+    return QIRtoSamplesSegmentCompiler(
+        quantised=q,
+        physical_setup=physical_setup,
+        full_scale_mv=full_scale_mv,
+        clip=clip,
+        full_scale=full_scale,
+    ).compile_to_card_int16(gpu=gpu, output=output)
 
 
 def _unit_sin2_calib() -> AODSin2Calib:
@@ -79,7 +98,7 @@ class TestSampleCompile(unittest.TestCase):
         )
         q = quantize_resolved_ir(ir)
         with self.assertRaises(ValueError):
-            compile_sequence_program(
+            _compile_to_card(
                 q,
                 physical_setup=_identity_setup(q.logical_channels),
                 full_scale_mv=1.0,
@@ -87,6 +106,70 @@ class TestSampleCompile(unittest.TestCase):
                 full_scale=20000,
                 output="cupy",
             )
+        with self.assertRaises(ValueError):
+            QIRtoSamplesSegmentCompiler(
+                quantised=q,
+                physical_setup=_identity_setup(q.logical_channels),
+                full_scale_mv=1.0,
+                clip=1.0,
+                full_scale=20000,
+            ).compile_to_voltage_mV(output="cupy")
+
+    def test_compile_to_voltage_mv_does_not_populate_int16_slots(self) -> None:
+        fs = 1000.0
+        n = 96
+        st = LogicalChannelState(
+            freqs_hz=np.array([10.0], dtype=float),
+            amps=np.array([1.0], dtype=float),
+            phases_rad=np.array([0.0], dtype=float),
+        )
+        empty = _empty_logical_channel_state()
+        seg0 = ResolvedSegment(
+            name="s0",
+            mode="loop_n",
+            loop=1,
+            parts=(
+                ResolvedPart(
+                    n_samples=n,
+                    logical_channels={
+                        "H": ResolvedLogicalChannelPart(
+                            start=st, end=st, interp=InterpSpec("hold")
+                        ),
+                        "V": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "A": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                        "B": ResolvedLogicalChannelPart(
+                            start=empty, end=empty, interp=InterpSpec("hold")
+                        ),
+                    },
+                ),
+            ),
+            phase_mode="manual",
+        )
+        ir = ResolvedIR(
+            sample_rate_hz=fs,
+            logical_channels=("H", "V", "A", "B"),
+            segments=(seg0,),
+        )
+        q = quantize_resolved_ir(ir)
+        repo = QIRtoSamplesSegmentCompiler(
+            quantised=q,
+            physical_setup=_identity_setup(q.logical_channels),
+            full_scale_mv=1.0,
+            clip=1.0,
+            full_scale=20000,
+        )
+        voltage = repo.compile_to_voltage_mV()
+        self.assertEqual(len(voltage), 1)
+        self.assertEqual(voltage[0].segment_index, 0)
+        self.assertEqual(voltage[0].name, "s0")
+        self.assertEqual(voltage[0].data_mV.shape, (4, n))
+        self.assertEqual(repo.compiled_indices, ())
+        with self.assertRaises(ValueError):
+            _ = repo.segments
 
     def test_phase_mode_continue_vs_manual(self) -> None:
         fs = 1000.0
@@ -156,14 +239,14 @@ class TestSampleCompile(unittest.TestCase):
         full_scale = 20000
         q_continue = quantize_resolved_ir(ir_continue)
         q_manual = quantize_resolved_ir(ir_manual)
-        prog_continue = compile_sequence_program(
+        prog_continue = _compile_to_card(
             q_continue,
             physical_setup=_identity_setup(q_continue.logical_channels),
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
-        prog_manual = compile_sequence_program(
+        prog_manual = _compile_to_card(
             q_manual,
             physical_setup=_identity_setup(q_manual.logical_channels),
             full_scale_mv=1.0,
@@ -269,14 +352,14 @@ class TestSampleCompile(unittest.TestCase):
         full_scale = 20000
         q_continue = quantize_resolved_ir(ir_continue)
         q_manual = quantize_resolved_ir(ir_manual)
-        prog_continue = compile_sequence_program(
+        prog_continue = _compile_to_card(
             q_continue,
             physical_setup=_identity_setup(q_continue.logical_channels),
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
-        prog_manual = compile_sequence_program(
+        prog_manual = _compile_to_card(
             q_manual,
             physical_setup=_identity_setup(q_manual.logical_channels),
             full_scale_mv=1.0,
@@ -334,7 +417,7 @@ class TestSampleCompile(unittest.TestCase):
             segments=(seg0,),
         )
         q = quantize_resolved_ir(ir)
-        prog = compile_sequence_program(
+        prog = _compile_to_card(
             q,
             physical_setup=_identity_setup(q.logical_channels),
             full_scale_mv=1.0,
@@ -379,14 +462,14 @@ class TestSampleCompile(unittest.TestCase):
             logical_to_hardware_map={"H": 0},
             channel_calibrations=(calib,),
         )
-        prog_uncal = compile_sequence_program(
+        prog_uncal = _compile_to_card(
             q,
             physical_setup=setup_uncal,
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
         )
-        prog_cal = compile_sequence_program(
+        prog_cal = _compile_to_card(
             q,
             physical_setup=setup_cal,
             full_scale_mv=1.0,
@@ -459,7 +542,7 @@ class TestSampleCompile(unittest.TestCase):
                 logical_to_hardware_map={"H": 0},
                 channel_calibrations=(calib,),
             )
-            compile_sequence_program(
+            _compile_to_card(
                 q,
                 physical_setup=setup_cal,
                 full_scale_mv=1.0,

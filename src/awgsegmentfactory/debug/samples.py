@@ -13,7 +13,7 @@ import numpy as np
 
 from ..calibration import AWGPhysicalSetupInfo
 from ..resolved_ir import ResolvedIR
-from ..synth_samples import QIRtoSamplesSegmentCompiler, compile_sequence_program
+from ..synth_samples import QIRtoSamplesSegmentCompiler
 from ..synth_samples import interp_logical_channel_part
 from ..quantize import QuantizedIR, quantize_resolved_ir
 
@@ -206,13 +206,13 @@ def sequence_samples_debug(
         setup = physical_setup
         if setup is None:
             setup = AWGPhysicalSetupInfo.identity(q_ir.logical_channels)
-        compiled = compile_sequence_program(
-            program,
+        compiled = QIRtoSamplesSegmentCompiler(
+            quantised=program,
             physical_setup=setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
             clip=clip,
-        )
+        ).compile_to_card_int16()
     else:
         quantized = quantize_resolved_ir(
             program,
@@ -221,13 +221,13 @@ def sequence_samples_debug(
         setup = physical_setup
         if setup is None:
             setup = AWGPhysicalSetupInfo.identity(q_ir.logical_channels)
-        compiled = compile_sequence_program(
-            quantized,
+        compiled = QIRtoSamplesSegmentCompiler(
+            quantised=quantized,
             physical_setup=setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
             clip=clip,
-        )
+        ).compile_to_card_int16()
     need_params = bool(show_param_traces) or bool(show_spot_grid)
     if need_params and q_ir is None:
         raise ValueError(

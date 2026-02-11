@@ -12,7 +12,7 @@ from ..builder import AWGProgramBuilder
 from ..calibration import AWGPhysicalSetupInfo
 from ..intent_ir import IntentIR
 from ..resolve import resolve_intent_ir
-from ..synth_samples import QIRtoSamplesSegmentCompiler, compile_sequence_program
+from ..synth_samples import QIRtoSamplesSegmentCompiler
 from ..quantize import quantize_resolved_ir
 
 
@@ -66,14 +66,13 @@ def compile_builder_pipeline_timed(
     setup = physical_setup
     if setup is None:
         setup = AWGPhysicalSetupInfo.identity(quantized.logical_channels)
-    compiled = compile_sequence_program(
-        quantized,
+    compiled = QIRtoSamplesSegmentCompiler(
+        quantised=quantized,
         physical_setup=setup,
         full_scale_mv=full_scale_mv,
         full_scale=full_scale,
         clip=clip,
-        gpu=gpu,
-    )
+    ).compile_to_card_int16(gpu=gpu)
     if gpu:
         # CuPy is asynchronous; ensure timings include queued GPU work.
         try:  # pragma: no cover
@@ -81,7 +80,7 @@ def compile_builder_pipeline_timed(
 
             cp.cuda.Stream.null.synchronize()
         except Exception:
-            # If CuPy isn't available here, compile_sequence_program(gpu=True) should
+            # If CuPy isn't available here, compile_to_card_int16(gpu=True) should
             # already have failed; keep this as a best-effort sync.
             pass
     t5 = perf_counter()

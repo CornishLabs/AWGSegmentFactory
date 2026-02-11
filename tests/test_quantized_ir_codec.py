@@ -2,9 +2,10 @@ import unittest
 
 import numpy as np
 
-from awgsegmentfactory import AWGProgramBuilder, compile_sequence_program, quantize_resolved_ir
+from awgsegmentfactory import AWGProgramBuilder, quantize_resolved_ir
 from awgsegmentfactory.calibration import AODSin2Calib, AWGPhysicalSetupInfo
 from awgsegmentfactory.quantize import QuantizedIR
+from awgsegmentfactory.synth_samples import QIRtoSamplesSegmentCompiler
 
 
 def _assert_encodable(obj) -> None:
@@ -68,20 +69,20 @@ class TestQuantizedIRCodec(unittest.TestCase):
             channel_calibrations=(calib,),
         )
 
-        c0 = compile_sequence_program(
-            q,
+        c0 = QIRtoSamplesSegmentCompiler(
+            quantised=q,
             physical_setup=physical_setup,
             full_scale_mv=1.0,
             clip=0.9,
             full_scale=32767,
-        )
-        c1 = compile_sequence_program(
-            q2,
+        ).compile_to_card_int16()
+        c1 = QIRtoSamplesSegmentCompiler(
+            quantised=q2,
             physical_setup=physical_setup,
             full_scale_mv=1.0,
             clip=0.9,
             full_scale=32767,
-        )
+        ).compile_to_card_int16()
 
         self.assertEqual(c0.steps, c1.steps)
         self.assertEqual(c0.quantization, c1.quantization)

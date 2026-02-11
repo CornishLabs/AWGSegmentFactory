@@ -2,7 +2,8 @@
 
 The core compilation pipeline operates on frequency deltas directly. Optical-power
 calibrations are applied during segment compilation via
-`QIRtoSamplesSegmentCompiler.compile(...)`.
+`QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)` or
+`QIRtoSamplesSegmentCompiler.compile_to_voltage_mV(...)`.
 """
 
 from __future__ import annotations
@@ -44,8 +45,10 @@ class OpticalPowerToRFAmpCalib(ABC):
     but the actual multisine waveform that drives the AOD should use RF amplitudes
     derived from a per-tone model (diffraction efficiency, amplifier response, etc).
 
-    This is applied during sample synthesis in `QIRtoSamplesSegmentCompiler.compile(...)` and is
-    also used for crest-factor phase optimisation so the optimiser sees the correct
+    This is applied during sample synthesis in
+    `QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)` and
+    `QIRtoSamplesSegmentCompiler.compile_to_voltage_mV(...)`, and is also used for
+    crest-factor phase optimisation so the optimiser sees the correct
     RF tone weights.
 
     Units convention used across this package:

@@ -6,7 +6,7 @@ from awgsegmentfactory import AWGProgramBuilder
 from awgsegmentfactory.calibration import AWGPhysicalSetupInfo
 from awgsegmentfactory.intent_ir import HoldOp, RemapFromDefOp, UseDefOp
 from awgsegmentfactory.quantize import quantize_resolved_ir
-from awgsegmentfactory.synth_samples import compile_sequence_program
+from awgsegmentfactory.synth_samples import QIRtoSamplesSegmentCompiler
 
 
 class TestBuilder(unittest.TestCase):
@@ -191,13 +191,13 @@ class TestBuilder(unittest.TestCase):
         self.assertAlmostEqual(float(v_part.end.amps[1]), 1.0, places=12)
 
         quantized = quantize_resolved_ir(ir)
-        prog = compile_sequence_program(
-            quantized,
+        prog = QIRtoSamplesSegmentCompiler(
+            quantised=quantized,
             physical_setup=AWGPhysicalSetupInfo.identity(quantized.logical_channels),
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=20000,
-        )
+        ).compile_to_card_int16()
         self.assertGreater(len(prog.segments), 0)
 
     def test_parallel_ops_share_one_time_interval(self) -> None:

@@ -1,15 +1,17 @@
 """Sample synthesis and quantisation for AWG sequence slots.
 
 Primary API:
-- `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)` creates a slot container.
-- `QIRtoSamplesSegmentCompiler.compile(...)` compiles all or selected segments.
-- `compile_sequence_program(...)` is a convenience wrapper for full compile.
+- Construct `QIRtoSamplesSegmentCompiler(...)` directly.
+- `QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)` compiles all or selected
+  segments into card-ready int16 buffers.
+- `QIRtoSamplesSegmentCompiler.compile_to_voltage_mV(...)` compiles all or selected
+  segments into synthesized voltage buffers.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Sequence, Tuple
+from typing import Any, Literal, Optional, Sequence
 
 import numpy as np
 
@@ -28,6 +30,17 @@ class CompiledSegment:
     n_samples: int
     # Shape: (n_channels, n_samples), NumPy or CuPy depending on compile output.
     data_i16: Any
+
+
+@dataclass(frozen=True)
+class CompiledVoltageSegment:
+    """One synthesized hardware segment: floating-point voltage array per channel."""
+
+    segment_index: int
+    name: str
+    n_samples: int
+    # Shape: (n_channels, n_samples), NumPy or CuPy depending on compile output.
+    data_mV: Any
 
 
 @dataclass(frozen=True)
@@ -394,7 +407,7 @@ def _cupy_or_raise():
     return cp
 
 
-def _quantise_voltage_buffer(
+def _quantize_voltage_buffer(
     data: Any,
     *,
     full_scale_mv: float,
@@ -448,13 +461,13 @@ class QIRtoSamplesSegmentCompiler:
     """
     Slot container for compiled segment data.
 
-    Compile all segments:
-        `repo.compile()`
+    Compile all segments to card-ready int16:
+        `repo.compile_to_card_int16()`
 
-    Recompile only selected segments (contiguous run):
-        `repo.compile(segment_indices=[k])`
-        `repo.compile(segment_indices=[k, k + 1])`
-        `repo.compile(segment_names=["seg_name"])`
+    Compile selected segments as floating-point voltages:
+        `repo.compile_to_voltage_mV(segment_indices=[k])`
+        `repo.compile_to_voltage_mV(segment_indices=[k, k + 1])`
+        `repo.compile_to_voltage_mV(segment_names=["seg_name"])`
 
     Notes:
     - Segment selection is intentionally restricted to a contiguous index run to keep
@@ -501,24 +514,6 @@ class QIRtoSamplesSegmentCompiler:
         self._phase_end_states: list[dict[str, _PhaseContinueState] | None] = [
             None
         ] * len(q_ir.segments)
-
-    @classmethod
-    def initialise_from_quantised(
-        cls,
-        *,
-        quantised: QuantizedIR,
-        physical_setup: AWGPhysicalSetupInfo,
-        full_scale_mv: float,
-        full_scale: int,
-        clip: float = 1.0,
-    ) -> "QIRtoSamplesSegmentCompiler":
-        return cls(
-            quantised=quantised,
-            physical_setup=physical_setup,
-            full_scale_mv=full_scale_mv,
-            full_scale=full_scale,
-            clip=clip,
-        )
 
     @property
     def sample_rate_hz(self) -> float:
@@ -656,62 +651,19 @@ class QIRtoSamplesSegmentCompiler:
             return None
         return prev_seed.get(logical_channel)
 
-    def compile(
+    def _synthesise_voltage_segments(
         self,
         *,
-        segment_indices: Sequence[int] | None = None,
-        segment_names: Sequence[str] | None = None,
-        phase_seed: "QIRtoSamplesSegmentCompiler | None" = None,
-        require_phase_seed_for_continue: bool = True,
-        gpu: bool = False,
-        output: Literal["numpy", "cupy"] = "numpy",
-    ) -> "QIRtoSamplesSegmentCompiler":
-        """
-        Compile selected segments into slot buffers.
-
-        Parameters
-        ----------
-        segment_indices / segment_names:
-            Choose which segments to compile. If omitted, compiles all segments.
-            Selection must be one contiguous run.
-        phase_seed:
-            Optional previously compiled slots object used only as phase-state seed
-            for `phase_mode="continue"` predecessor continuity.
-        require_phase_seed_for_continue:
-            If True (default), compiling a non-initial `continue` segment without a
-            known predecessor phase state raises.
-        Footgun:
-            If segment `k` is recompiled and segment `k+1` uses `phase_mode="continue"`,
-            you should generally recompile `k+1` too (or a contiguous suffix `k..end`)
-            before upload, otherwise `k+1` may carry stale predecessor assumptions.
-        gpu / output:
-            Same semantics as the old compile API:
-            - `gpu=False`: CPU synthesis + quantisation.
-            - `gpu=True, output="cupy"`: GPU synthesis + quantisation (CuPy buffers).
-            - `gpu=True, output="numpy"`: GPU synthesis + quantisation + final copy to NumPy.
-        """
+        idxs: Sequence[int],
+        phase_seed: "QIRtoSamplesSegmentCompiler | None",
+        require_phase_seed_for_continue: bool,
+        gpu: bool,
+        output: Literal["numpy", "cupy"],
+    ) -> tuple[tuple[CompiledVoltageSegment, ...], dict[int, dict[str, _PhaseContinueState]], Any]:
         if output not in ("numpy", "cupy"):
             raise ValueError("output must be 'numpy' or 'cupy'")
         if output == "cupy" and not gpu:
             raise ValueError("output='cupy' requires gpu=True")
-
-        idxs = self._resolve_segment_indices(
-            segment_indices=segment_indices,
-            segment_names=segment_names,
-        )
-
-        target_kind = "cupy" if output == "cupy" else "numpy"
-        existing_kind = self._buffer_kind()
-        if existing_kind == "mixed":
-            raise RuntimeError(
-                "Compiled slots contain mixed buffer types; create a fresh slots object."
-            )
-        if existing_kind in ("numpy", "cupy") and existing_kind != target_kind:
-            raise ValueError(
-                "Cannot mix compiled buffer types in one slots object. "
-                f"Existing={existing_kind}, requested={target_kind}. "
-                "Create a fresh QIRtoSamplesSegmentCompiler for the other output type."
-            )
 
         xp: Any = np
         cp: Any = None
@@ -722,6 +674,9 @@ class QIRtoSamplesSegmentCompiler:
         q_ir = self.quantised.resolved_ir
         amp_calib: Optional[OpticalPowerToRFAmpCalib] = self.physical_setup
         n_channels = int(self.physical_setup.N_ch)
+
+        out: list[CompiledVoltageSegment] = []
+        phase_out_by_index: dict[int, dict[str, _PhaseContinueState]] = {}
 
         for idx in idxs:
             seg = q_ir.segments[idx]
@@ -734,11 +689,15 @@ class QIRtoSamplesSegmentCompiler:
             for logical_channel in q_ir.logical_channels:
                 phase_in: _PhaseContinueState | None = None
                 if idx > 0 and phase_mode == "continue":
-                    phase_in = self._phase_seed_for_channel(
-                        segment_index=idx,
-                        logical_channel=logical_channel,
-                        phase_seed=phase_seed,
-                    )
+                    prev_run = phase_out_by_index.get(idx - 1)
+                    if prev_run is not None:
+                        phase_in = prev_run.get(logical_channel)
+                    else:
+                        phase_in = self._phase_seed_for_channel(
+                            segment_index=idx,
+                            logical_channel=logical_channel,
+                            phase_seed=phase_seed,
+                        )
                     if phase_in is None and require_phase_seed_for_continue:
                         raise ValueError(
                             "Cannot compile segment without predecessor phase state: "
@@ -771,21 +730,104 @@ class QIRtoSamplesSegmentCompiler:
                     phases_rad=phase_out_np,
                 )
 
-            data_i16 = _quantise_voltage_buffer(
-                data,
+            if cp is not None and output == "numpy":
+                data = cp.asnumpy(data)
+
+            out.append(
+                CompiledVoltageSegment(
+                    segment_index=idx,
+                    name=seg.name,
+                    n_samples=n,
+                    data_mV=data,
+                )
+            )
+            phase_out_by_index[idx] = phase_out_by_channel
+
+        return tuple(out), phase_out_by_index, cp
+
+    def compile_to_card_int16(
+        self,
+        *,
+        segment_indices: Sequence[int] | None = None,
+        segment_names: Sequence[str] | None = None,
+        phase_seed: "QIRtoSamplesSegmentCompiler | None" = None,
+        require_phase_seed_for_continue: bool = True,
+        gpu: bool = False,
+        output: Literal["numpy", "cupy"] = "numpy",
+    ) -> "QIRtoSamplesSegmentCompiler":
+        """
+        Compile selected segments into card-ready int16 slot buffers.
+
+        Parameters
+        ----------
+        segment_indices / segment_names:
+            Choose which segments to compile. If omitted, compiles all segments.
+            Selection must be one contiguous run.
+        phase_seed:
+            Optional previously compiled slots object used only as phase-state seed
+            for `phase_mode="continue"` predecessor continuity.
+        require_phase_seed_for_continue:
+            If True (default), compiling a non-initial `continue` segment without a
+            known predecessor phase state raises.
+        Footgun:
+            If segment `k` is recompiled and segment `k+1` uses `phase_mode="continue"`,
+            you should generally recompile `k+1` too (or a contiguous suffix `k..end`)
+            before upload, otherwise `k+1` may carry stale predecessor assumptions.
+        gpu / output:
+            - `gpu=False`: CPU synthesis + quantisation.
+            - `gpu=True, output="cupy"`: GPU synthesis + quantisation (CuPy buffers).
+            - `gpu=True, output="numpy"`: GPU synthesis + quantisation + final copy to NumPy.
+        """
+        if output not in ("numpy", "cupy"):
+            raise ValueError("output must be 'numpy' or 'cupy'")
+        if output == "cupy" and not gpu:
+            raise ValueError("output='cupy' requires gpu=True")
+
+        idxs = self._resolve_segment_indices(
+            segment_indices=segment_indices,
+            segment_names=segment_names,
+        )
+
+        target_kind = "cupy" if output == "cupy" else "numpy"
+        existing_kind = self._buffer_kind()
+        if existing_kind == "mixed":
+            raise RuntimeError(
+                "Compiled slots contain mixed buffer types; create a fresh slots object."
+            )
+        if existing_kind in ("numpy", "cupy") and existing_kind != target_kind:
+            raise ValueError(
+                "Cannot mix compiled buffer types in one slots object. "
+                f"Existing={existing_kind}, requested={target_kind}. "
+                "Create a fresh QIRtoSamplesSegmentCompiler for the other output type."
+            )
+
+        voltage_segments, phase_out_by_index, cp = self._synthesise_voltage_segments(
+            idxs=idxs,
+            phase_seed=phase_seed,
+            require_phase_seed_for_continue=require_phase_seed_for_continue,
+            gpu=gpu,
+            output=output,
+        )
+
+        for voltage_seg in voltage_segments:
+            data_i16 = _quantize_voltage_buffer(
+                voltage_seg.data_mV,
                 full_scale_mv=self.full_scale_mv,
                 full_scale=self.full_scale,
                 clip=self.clip,
             )
-            if cp is not None and output == "numpy":
+
+            if cp is not None and output == "numpy" and not isinstance(data_i16, np.ndarray):
                 data_i16 = cp.asnumpy(data_i16)
 
-            self._segments[idx] = CompiledSegment(
-                name=seg.name,
-                n_samples=n,
+            self._segments[voltage_seg.segment_index] = CompiledSegment(
+                name=voltage_seg.name,
+                n_samples=voltage_seg.n_samples,
                 data_i16=data_i16,
             )
-            self._phase_end_states[idx] = phase_out_by_channel
+            self._phase_end_states[voltage_seg.segment_index] = phase_out_by_index[
+                voltage_seg.segment_index
+            ]
 
         # Any downstream segment that wasn't part of this compile run must be considered stale.
         last = idxs[-1]
@@ -795,9 +837,37 @@ class QIRtoSamplesSegmentCompiler:
 
         return self
 
+    def compile_to_voltage_mV(
+        self,
+        *,
+        segment_indices: Sequence[int] | None = None,
+        segment_names: Sequence[str] | None = None,
+        phase_seed: "QIRtoSamplesSegmentCompiler | None" = None,
+        require_phase_seed_for_continue: bool = True,
+        gpu: bool = False,
+        output: Literal["numpy", "cupy"] = "numpy",
+    ) -> tuple[CompiledVoltageSegment, ...]:
+        """
+        Compile selected segments into synthesized voltage buffers (`mV`).
+
+        This method is read-only with respect to the stored card-ready int16 slots.
+        """
+        idxs = self._resolve_segment_indices(
+            segment_indices=segment_indices,
+            segment_names=segment_names,
+        )
+        voltage_segments, _phase_out_by_index, _cp = self._synthesise_voltage_segments(
+            idxs=idxs,
+            phase_seed=phase_seed,
+            require_phase_seed_for_continue=require_phase_seed_for_continue,
+            gpu=gpu,
+            output=output,
+        )
+        return voltage_segments
+
     def to_numpy(self) -> "QIRtoSamplesSegmentCompiler":
         """Return a copy with all compiled segment buffers on CPU/NumPy."""
-        out = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+        out = QIRtoSamplesSegmentCompiler(
             quantised=self.quantised,
             physical_setup=self.physical_setup,
             full_scale_mv=self.full_scale_mv,
@@ -840,7 +910,7 @@ class QIRtoSamplesSegmentCompiler:
         return out
 
 
-def quantise_and_normalise_voltage_for_awg(
+def quantize_voltage_buffer_to_int16(
     synthesised_mV: Any,
     *,
     full_scale_mv: float,
@@ -850,33 +920,12 @@ def quantise_and_normalise_voltage_for_awg(
     """
     Quantize one synthesized voltage buffer (`mV`) to AWG int16 codes.
 
-    This helper is now buffer-level only. For sequence compilation, use
-    `QIRtoSamplesSegmentCompiler.compile(...)`.
+    This helper is buffer-level only. For sequence compilation use
+    `QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)`.
     """
-    return _quantise_voltage_buffer(
+    return _quantize_voltage_buffer(
         synthesised_mV,
         full_scale_mv=full_scale_mv,
         full_scale=full_scale,
         clip=clip,
     )
-
-
-def compile_sequence_program(
-    quantised: QuantizedIR,
-    *,
-    physical_setup: AWGPhysicalSetupInfo,
-    full_scale_mv: float,
-    full_scale: int,
-    clip: float = 1.0,
-    gpu: bool = False,
-    output: Literal["numpy", "cupy"] = "numpy",
-) -> QIRtoSamplesSegmentCompiler:
-    """Convenience wrapper: create slots and compile all segments."""
-    repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
-        quantised=quantised,
-        physical_setup=physical_setup,
-        full_scale_mv=full_scale_mv,
-        full_scale=full_scale,
-        clip=clip,
-    )
-    return repo.compile(gpu=gpu, output=output)

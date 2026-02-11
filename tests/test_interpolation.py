@@ -13,7 +13,7 @@ from awgsegmentfactory.resolved_ir import (
     ResolvedSegment,
 )
 from awgsegmentfactory.resolved_timeline import LogicalChannelState
-from awgsegmentfactory.synth_samples import compile_sequence_program
+from awgsegmentfactory.synth_samples import QIRtoSamplesSegmentCompiler
 
 
 class TestInterpolation(unittest.TestCase):
@@ -81,11 +81,11 @@ class TestInterpolation(unittest.TestCase):
         )
 
         quantized = quantize_resolved_ir(ir)
-        prog = compile_sequence_program(
-            quantized,
+        prog = QIRtoSamplesSegmentCompiler(
+            quantised=quantized,
             physical_setup=AWGPhysicalSetupInfo.identity(quantized.logical_channels),
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=20000,
-        )
+        ).compile_to_card_int16()
         self.assertEqual(prog.segments[0].data_i16.shape, (4, n))

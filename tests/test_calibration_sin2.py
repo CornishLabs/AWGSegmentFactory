@@ -12,7 +12,7 @@ from awgsegmentfactory.resolved_ir import (
     ResolvedSegment,
 )
 from awgsegmentfactory.resolved_timeline import LogicalChannelState
-from awgsegmentfactory.synth_samples import compile_sequence_program
+from awgsegmentfactory.synth_samples import QIRtoSamplesSegmentCompiler
 
 
 class TestAODSin2Calib(unittest.TestCase):
@@ -80,13 +80,13 @@ class TestAODSin2Calib(unittest.TestCase):
             logical_to_hardware_map={"H": 0},
             channel_calibrations=(calib,),
         )
-        prog = compile_sequence_program(
-            q,
+        prog = QIRtoSamplesSegmentCompiler(
+            quantised=q,
             physical_setup=physical_setup,
             full_scale_mv=1.0,
             clip=1.0,
             full_scale=full_scale,
-        )
+        ).compile_to_card_int16()
 
         expected_amp = float((2.0 / np.pi) * np.arcsin(np.sqrt(0.25)))
         expected_i16 = int(np.rint(expected_amp * float(full_scale)))

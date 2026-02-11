@@ -377,8 +377,9 @@ class AWGProgramBuilder:
         - `"continue"`: continue matching tone phases from the previous segment (by frequency),
           and crest-optimise any new/unmatched tones while keeping continued tones fixed.
 
-        Note: phase optimisation happens at compile time (`compile_sequence_program(...)`),
-        not in `ResolvedIR.to_timeline()`.
+        Note: phase optimisation happens at compile time
+        (`QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)` /
+        `.compile_to_voltage_mV(...)`), not in `ResolvedIR.to_timeline()`.
         """
         mode_s = str(mode)
         resolved_mode: SegmentMode

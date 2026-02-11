@@ -203,13 +203,13 @@ def main() -> None:
         )
         q = quantize_resolved_ir(ir, segment_quantum_s=segment_quantum_s, step_samples=64)
         setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0})
-        slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+        slots_compiler = QIRtoSamplesSegmentCompiler(
             quantised=q,
             physical_setup=setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
         )
-        slots_compiler.compile()
+        slots_compiler.compile_to_card_int16()
         session = upload_sequence_program(slots_compiler, mode="cpu", card=card, upload_steps=True)
         print("initial full upload complete")
         print_quantization_report(slots_compiler)
@@ -248,7 +248,9 @@ def main() -> None:
                         ramp_start_mv=start_mv,
                         ramp_end_mv=end_mv,
                     )
-                    slots_compiler.compile(segment_indices=[HOTSWAP_SEGMENT_INDEX])
+                    slots_compiler.compile_to_card_int16(
+                        segment_indices=[HOTSWAP_SEGMENT_INDEX]
+                    )
                     session = upload_sequence_program(
                         slots_compiler,
                         mode="cpu",

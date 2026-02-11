@@ -9,7 +9,7 @@ Show the different "depths" of compilation for AWGSegmentFactory:
 
 This is also a sketch of how a NumPy/CuPy backend could turn `ResolvedIR`
 parts into vectorised arrays (freq/amp/phase per sample). This idea is now
-implemented in the main compiler via `compile_sequence_program(..., gpu=True)`.
+implemented in the main compiler via `compile_to_card_int16(..., gpu=True)`.
 """
 
 from __future__ import annotations

@@ -89,25 +89,32 @@ quantised = quantize_resolved_ir(
 physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 card_max_mV = 450.0  # match your AWG channel amplitude setting
 
-slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+slots_compiler = QIRtoSamplesSegmentCompiler(
     quantised=quantised,
     physical_setup=physical_setup,
     full_scale_mv=card_max_mV,
     full_scale=32767,
 )
-slots_compiler.compile()
+slots_compiler.compile_to_card_int16()
 
 print("segments:", len(slots_compiler.segments))
 print("steps:", len(slots_compiler.steps))
 ```
 
-`compile_sequence_program(...)` is a convenience wrapper around:
-- `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
-- `repo.compile(...)`
+If you want synthesized floating-point voltages instead of card int16 codes:
+
+```python
+voltage_segments = QIRtoSamplesSegmentCompiler(
+    quantised=quantised,
+    physical_setup=physical_setup,
+    full_scale_mv=card_max_mV,
+    full_scale=32767,
+).compile_to_voltage_mV()
+```
 
 ### GPU synthesis (optional)
 
-If you have CuPy + an NVIDIA GPU available, `compile_sequence_program(..., gpu=True)` runs the
+If you have CuPy + an NVIDIA GPU available, `compile_to_card_int16(..., gpu=True)` runs the
 sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
@@ -115,10 +122,11 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
   - To convert back to NumPy, use `slots_compiler.to_numpy()`.
 
 For explicit slot control (including partial recompile/hot-swap):
-- `repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
-- `repo.compile()` for all segments, or `repo.compile(segment_indices=[k])` for one segment.
-- `repo.compile(gpu=True, output="cupy")` keeps compiled buffers on GPU.
-- `repo.compile(gpu=True, output="numpy")` compiles on GPU and returns NumPy buffers.
+- `repo = QIRtoSamplesSegmentCompiler(...)`
+- `repo.compile_to_card_int16()` for all segments, or `repo.compile_to_card_int16(segment_indices=[k])` for one segment.
+- `repo.compile_to_card_int16(gpu=True, output="cupy")` keeps compiled buffers on GPU.
+- `repo.compile_to_card_int16(gpu=True, output="numpy")` compiles on GPU and returns NumPy buffers.
+- `repo.compile_to_voltage_mV(...)` returns floating-point synthesized voltages without writing int16 slots.
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -132,7 +140,7 @@ Each segment can set `phase_mode` to control how the *start phases* are chosen:
   any new/unmatched tones while keeping continued tones fixed.
 
 Notes:
-- `phase_mode` is applied during `compile_sequence_program(...)` (sample synthesis). The debug
+- `phase_mode` is applied during `compile_to_card_int16(...)` / `compile_to_voltage_mV(...)` (sample synthesis). The debug
   timeline `ResolvedIR.to_timeline()` shows pre-optimised phases.
 - `.define(..., phases="auto")` currently means "all zeros"; this is typically fine when using
   `phase_mode="optimise"`/`"continue"`.
@@ -220,7 +228,7 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
   - serializable via `serialise` / `deserialise`.
 
 - `AWGPhysicalSetupInfo`
-  - container passed to `compile_sequence_program(..., physical_setup=...)`.
+  - container passed to `QIRtoSamplesSegmentCompiler(..., physical_setup=...)`.
   - serializable via `serialise` / `deserialise` and `to_file` / `from_file`.
   - fields:
     - `logical_to_hardware_map: Dict[str, int]`
@@ -234,8 +242,7 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
 
 ### Voltage normalization
 
-- `full_scale_mv` in `compile_sequence_program(...)` (and in
-  `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`) is the AWG output voltage (mV)
+- `full_scale_mv` in `QIRtoSamplesSegmentCompiler(...)` is the AWG output voltage (mV)
   that maps to `full_scale`.
 - `clip` defaults to `1.0` in both APIs.
 - If your card is configured to `card_max_mV`, use:
@@ -257,7 +264,7 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
    - optionally set provenance with repeated `--traceability-string`.
 3) Save JSON output (`--write-out`) and load as `AWGPhysicalSetupInfo.from_file(...)`.
 4) Compile with calibration:
-   - `compile_sequence_program(..., physical_setup=awg_physical_setup)`.
+   - `QIRtoSamplesSegmentCompiler(..., physical_setup=awg_physical_setup).compile_to_card_int16()`.
 
 Examples:
 - `examples/fit_optical_power_calibration.py` (fit and inspect generated `AODSin2Calib`/`AWGPhysicalSetupInfo`)
@@ -283,9 +290,8 @@ flowchart LR
 
     setup -->|"physical_setup"| compiler
     setup -->|"physical_setup"| compiled
-    quantised -->|"initialise_from_quantised(quantised, physical_setup, full_scale_mv, full_scale, clip)"| compiler
-    compiler -->|"compile(segment_indices, segment_names, phase_seed, gpu, output)"| compiled
-    quantised -->|"compile_sequence_program(quantised, physical_setup, full_scale_mv, full_scale, clip, gpu, output)"| compiled
+    quantised -->|"QIRtoSamplesSegmentCompiler(quantised, physical_setup, full_scale_mv, full_scale, clip)"| compiler
+    compiler -->|"compile_to_card_int16(segment_indices, segment_names, phase_seed, gpu, output)"| compiled
 
     resolved -->|"to_timeline()"| timeline
     quantised -->|"debug helpers"| debug
@@ -302,9 +308,9 @@ flowchart LR
    - `quantize_resolved_ir(resolved)` returns a `QuantizedIR`:
      a quantised `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
-   - `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)` creates a slot container.
-   - `repo.compile(...)` compiles all segments or a contiguous subset.
-   - `compile_sequence_program(...)` is a convenience wrapper for full compile.
+   - `QIRtoSamplesSegmentCompiler(...)` creates a slot container.
+   - `repo.compile_to_card_int16(...)` compiles all segments or a contiguous subset.
+   - `repo.compile_to_voltage_mV(...)` compiles all/selected segments to floating-point voltage buffers.
 
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/resolved_timeline.py`) and `ResolvedIR.to_timeline()`
@@ -335,7 +341,8 @@ For plotting/state queries there is also a debug view:
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
 - `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODSin2Calib`) are consumed during
-  `QIRtoSamplesSegmentCompiler.compile(...)` / `compile_sequence_program(...)` to convert
+  `QIRtoSamplesSegmentCompiler.compile_to_card_int16(...)` /
+  `QIRtoSamplesSegmentCompiler.compile_to_voltage_mV(...)` to convert
   `(freq, optical_power)` → RF synthesis amplitudes.
 
 ## Roadmap

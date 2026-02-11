@@ -101,13 +101,13 @@ def main() -> None:
 
         # Quantize once with the card's exact DAC scaling.
         full_scale = int(card.max_sample_value()) - 1
-        slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+        slots_compiler = QIRtoSamplesSegmentCompiler(
             quantised=q,
             physical_setup=physical_setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
         )
-        slots_compiler.compile()
+        slots_compiler.compile_to_card_int16()
 
         print(f"compiled segments: {len(slots_compiler.segments)} | steps: {len(slots_compiler.steps)}")
         print_quantization_report(slots_compiler)
