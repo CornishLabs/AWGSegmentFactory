@@ -18,12 +18,11 @@ import time
 import numpy as np
 
 from awgsegmentfactory import (
+    QIRtoSamplesSegmentCompiler,
     AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
-    quantise_and_normalise_voltage_for_awg,
     quantize_resolved_ir,
-    synthesize_sequence_program,
     upload_sequence_program,
 )
 
@@ -95,10 +94,6 @@ def main() -> None:
         segment_quantum_s=segment_quantum_s,
         step_samples=int(args.step_samples),
     )
-    synthesized = synthesize_sequence_program(
-        q,
-        physical_setup=physical_setup,
-    )
 
     # Match channels.amp(1 * units.V): full-scale output is 1000 mV.
     full_scale_mv = 1000.0
@@ -129,21 +124,23 @@ def main() -> None:
 
         # Quantize once with the card's exact DAC scaling.
         full_scale = int(card.max_sample_value()) - 1
-        compiled = quantise_and_normalise_voltage_for_awg(
-            synthesized,
+        slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+            quantized=q,
+            physical_setup=physical_setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
         )
+        slots_compiler.compile()
 
-        print(f"compiled segments: {len(compiled.segments)} | steps: {len(compiled.steps)}")
-        print_quantization_report(compiled)
+        print(f"compiled segments: {len(slots_compiler.segments)} | steps: {len(slots_compiler.steps)}")
+        print_quantization_report(slots_compiler)
         print(
             "Notes:\n"
             "- EXT0 trigger transitions from 'wait_low' -> 'pulse_high'.\n"
             "- 'pulse_high' then wraps back to 'wait_low' automatically.\n"
         )
 
-        _session = upload_sequence_program(compiled, mode="cpu", card=card)
+        _session = upload_sequence_program(slots_compiler, mode="cpu", card=card)
         print("sequence written; starting card (Ctrl+C to stop)")
 
         card.timeout(0)

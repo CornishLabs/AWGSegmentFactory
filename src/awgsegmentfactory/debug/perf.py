@@ -12,7 +12,7 @@ from ..builder import AWGProgramBuilder
 from ..calibration import AWGPhysicalSetupInfo
 from ..intent_ir import IntentIR
 from ..resolve import resolve_intent_ir
-from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
+from ..synth_samples import QIRtoSamplesSegmentCompiler, compile_sequence_program
 from ..quantize import quantize_resolved_ir
 
 
@@ -37,7 +37,7 @@ def compile_builder_pipeline_timed(
     clip: float = 1.0,
     full_scale: int = 32767,
     gpu: bool = False,
-) -> tuple[CompiledSequenceProgram, PipelineTimings]:
+) -> tuple[QIRtoSamplesSegmentCompiler, PipelineTimings]:
     """
     Compile end-to-end (Builder -> IntentIR -> ResolvedIR -> QuantizedIR -> samples),
     returning both the compiled program and per-stage wall-clock timings.

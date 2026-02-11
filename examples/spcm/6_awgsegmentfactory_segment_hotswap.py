@@ -14,10 +14,10 @@ import math
 import time
 
 from awgsegmentfactory import (
+    QIRtoSamplesSegmentCompiler,
     AWGPhysicalSetupInfo,
     AWGProgramBuilder,
     ResolvedIR,
-    compile_sequence_program,
     quantize_resolved_ir,
     upload_sequence_program,
 )
@@ -26,6 +26,7 @@ from common import print_quantization_report
 
 
 HOTSWAP_SEGMENT_INDEX = 1  # "pulse" segment in this example
+HOTSWAP_LOGICAL_CHANNEL = "H"
 
 
 def _build_hotswap_program(
@@ -54,31 +55,17 @@ def _build_hotswap_program(
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 
 
-def _compile_for_card(
+def _set_pulse_amplitude_in_quantized(
     *,
-    sample_rate_hz: float,
-    full_scale_mv: float,
-    full_scale: int,
-    low_mv: float,
+    quantized,
     pulse_mv: float,
-    pulse_s: float,
-    segment_quantum_s: float,
-) -> tuple[ResolvedIR, object]:
-    ir = _build_hotswap_program(
-        sample_rate_hz=sample_rate_hz,
-        low_mv=low_mv,
-        pulse_mv=pulse_mv,
-        pulse_s=pulse_s,
-    )
-    q = quantize_resolved_ir(ir, segment_quantum_s=segment_quantum_s, step_samples=64)
-    setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0})
-    compiled = compile_sequence_program(
-        q,
-        physical_setup=setup,
-        full_scale_mv=full_scale_mv,
-        full_scale=full_scale,
-    )
-    return ir, compiled
+) -> None:
+    """Mutate the pulse segment amplitude in-place inside a QuantizedIR object."""
+    seg = quantized.resolved_ir.segments[HOTSWAP_SEGMENT_INDEX]
+    for part in seg.parts:
+        pp = part.logical_channels[HOTSWAP_LOGICAL_CHANNEL]
+        pp.start.amps[...] = float(pulse_mv)
+        pp.end.amps[...] = float(pulse_mv)
 
 
 def main() -> None:
@@ -136,19 +123,24 @@ def main() -> None:
 
         full_scale = int(card.max_sample_value()) - 1
 
-        # Initial full upload.
-        _ir0, compiled0 = _compile_for_card(
+        ir = _build_hotswap_program(
             sample_rate_hz=sample_rate_hz,
-            full_scale_mv=full_scale_mv,
-            full_scale=full_scale,
             low_mv=low_mv,
             pulse_mv=pulse_values_mv[0],
             pulse_s=pulse_s,
-            segment_quantum_s=segment_quantum_s,
         )
-        session = upload_sequence_program(compiled0, mode="cpu", card=card)
+        q = quantize_resolved_ir(ir, segment_quantum_s=segment_quantum_s, step_samples=64)
+        setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0})
+        slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
+            quantized=q,
+            physical_setup=setup,
+            full_scale_mv=full_scale_mv,
+            full_scale=full_scale,
+        )
+        slots_compiler.compile()
+        session = upload_sequence_program(slots_compiler, mode="cpu", card=card, upload_steps=True)
         print("initial full upload complete")
-        print_quantization_report(compiled0)
+        print_quantization_report(slots_compiler)
 
         card.timeout(0)
         card.start(spcm.M2CMD_CARD_ENABLETRIGGER, spcm.M2CMD_CARD_FORCETRIGGER)
@@ -157,21 +149,18 @@ def main() -> None:
         # Data-only hot-swap updates for one segment.
         try:
             for pulse_mv in pulse_values_mv[1:]:
-                _ir, compiled_new = _compile_for_card(
-                    sample_rate_hz=sample_rate_hz,
-                    full_scale_mv=full_scale_mv,
-                    full_scale=full_scale,
-                    low_mv=low_mv,
+                _set_pulse_amplitude_in_quantized(
+                    quantized=q,
                     pulse_mv=pulse_mv,
-                    pulse_s=pulse_s,
-                    segment_quantum_s=segment_quantum_s,
                 )
+                slots_compiler.compile(segment_indices=[HOTSWAP_SEGMENT_INDEX])
                 session = upload_sequence_program(
-                    compiled_new,
+                    slots_compiler,
                     mode="cpu",
                     card=card,
                     cpu_session=session,
                     segment_indices=[HOTSWAP_SEGMENT_INDEX],
+                    upload_steps=False,
                 )
                 print(
                     f"hot-swapped segment {HOTSWAP_SEGMENT_INDEX} with pulse_mv={pulse_mv:.1f}"

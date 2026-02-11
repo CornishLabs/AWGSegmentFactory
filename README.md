@@ -98,11 +98,11 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
 - `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
-  - To convert back to NumPy, use `compiled_sequence_program_to_numpy(...)`.
+  - To convert back to NumPy, use `compiled_sequence_slots_to_numpy(...)`.
 
-If you want explicit control of stages, you can use:
-- `synthesize_sequence_program(...)` (float synthesis; optional GPU)
-- `quantise_and_normalise_voltage_for_awg(...)` (full-scale-voltage/clip/full-scale to int16)
+For explicit slot control (including partial recompile/hot-swap):
+- `repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
+- `repo.compile()` for all segments, or `repo.compile(segment_indices=[k])` for one segment.
 
 See `examples/benchmark_pipeline.py --gpu`.
 
@@ -137,9 +137,9 @@ Install the optional dependency group first: `uv sync --extra control-hardware`
 `upload_sequence_program(...)` supports CPU upload when you pass an open `spcm.Card`:
 
 - full upload:
-  - `session = upload_sequence_program(compiled, mode="cpu", card=card)`
+  - `session = upload_sequence_program(repo, mode="cpu", card=card, upload_steps=True)`
 - data-only update (same segment lengths + same step graph):
-  - `upload_sequence_program(compiled_new, mode="cpu", card=card, cpu_session=session, segment_indices=[k])`
+  - `upload_sequence_program(repo, mode="cpu", card=card, cpu_session=session, segment_indices=[k], upload_steps=False)`
 
 For connection/configuration flow, see `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
 For one-segment data hot-swap, see `examples/spcm/6_awgsegmentfactory_segment_hotswap.py`.
@@ -196,8 +196,8 @@ Built-in calibration objects (`src/awgsegmentfactory/calibration.py`):
 
 ### Voltage normalization
 
-- `full_scale_mv` in `compile_sequence_program(...)` and
-  `quantise_and_normalise_voltage_for_awg(...)` is the AWG output voltage (mV)
+- `full_scale_mv` in `compile_sequence_program(...)` (and in
+  `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`) is the AWG output voltage (mV)
   that maps to `full_scale`.
 - `clip` defaults to `1.0` in both APIs.
 - If your card is configured to `card_max_mV`, use:
@@ -233,7 +233,7 @@ flowchart LR
     I[IntentIR]
     R[ResolvedIR]
     Q[QuantizedIR]
-    C[CompiledSequenceProgram]
+    C[QIRtoSamplesSegmentCompiler]
 
     B -- build_intent_ir --> I
     I -- resolve_intent_ir --> R
@@ -256,9 +256,9 @@ flowchart LR
    - `quantize_resolved_ir(resolved)` returns a `QuantizedIR`:
      a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
-   - `synthesize_sequence_program(quantized, physical_setup=...)` builds float per-segment waveforms.
-   - `quantise_and_normalise_voltage_for_awg(...)` applies full-scale-voltage/clip/full-scale and produces int16 buffers.
-   - `compile_sequence_program(...)` is a convenience wrapper for both steps.
+   - `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)` creates a slot container.
+   - `repo.compile(...)` compiles all segments or a contiguous subset.
+   - `compile_sequence_program(...)` is a convenience wrapper for full compile.
 
 For plotting/state queries there is also a debug view:
 - `ResolvedTimeline` (`src/awgsegmentfactory/resolved_timeline.py`) and `ResolvedIR.to_timeline()`
@@ -268,7 +268,7 @@ For plotting/state queries there is also a debug view:
 - **Intent IR**: continuous-time spec in seconds; “what you want”.
 - **Resolved IR**: sample-quantized primitives (per-part integer sample counts); “what you mean”.
 - **Quantized IR**: hardware-aligned segment lengths + optional wrap snapping; “what you can upload”.
-- **Compiled program**: final int16 segment buffers + step table; “what the card plays”.
+- **Compiled slots**: slot container with final int16 segment buffers + step table; “what the card plays”.
 
 ## Repository guide (reading order)
 
@@ -278,7 +278,7 @@ For plotting/state queries there is also a debug view:
 4) `src/awgsegmentfactory/resolve.py` – resolver (`IntentIR` → `ResolvedIR`).
 5) `src/awgsegmentfactory/resolved_ir.py` – resolved IR dataclasses and helpers.
 6) `src/awgsegmentfactory/quantize.py` – quantisation (`ResolvedIR` → `QuantizedIR`) + wrap snapping.
-7) `src/awgsegmentfactory/synth_samples.py` – synthesis (`QuantizedIR` → `CompiledSequenceProgram`).
+7) `src/awgsegmentfactory/synth_samples.py` – synthesis (`QuantizedIR` → `QIRtoSamplesSegmentCompiler`).
 8) `src/awgsegmentfactory/resolved_timeline.py` – debug timeline spans and interpolation.
 9) `src/awgsegmentfactory/calibration.py` – calibration interfaces and built-in models.
 10) `src/awgsegmentfactory/optical_power_calibration_fit.py` – fitting helpers for `AODSin2Calib`.
@@ -289,8 +289,8 @@ For plotting/state queries there is also a debug view:
 - `phases="auto"` currently means phases default to 0; use per-segment `phase_mode` for
   crest-optimised/continued phases during compilation.
 - `OpticalPowerToRFAmpCalib` calibrations (e.g. `AODSin2Calib`) are consumed during
-  `synthesize_sequence_program(..., physical_setup=...)` / `compile_sequence_program(...)`
-  to convert `(freq, optical_power)` → RF synthesis amplitudes.
+  `QIRtoSamplesSegmentCompiler.compile(...)` / `compile_sequence_program(...)` to convert
+  `(freq, optical_power)` → RF synthesis amplitudes.
 
 ## Roadmap
 

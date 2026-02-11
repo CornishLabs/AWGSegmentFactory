@@ -1,8 +1,8 @@
 """Calibration helpers for higher-level, position-like operations.
 
 The core compilation pipeline operates on frequency deltas directly. Optical-power
-calibrations are applied at synthesis time via
-`synthesize_sequence_program(..., physical_setup=...)`.
+calibrations are applied during segment compilation via
+`QIRtoSamplesSegmentCompiler.compile(...)`.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class OpticalPowerToRFAmpCalib(ABC):
     but the actual multisine waveform that drives the AOD should use RF amplitudes
     derived from a per-tone model (diffraction efficiency, amplifier response, etc).
 
-    This is applied during sample synthesis (`synthesize_sequence_program(...)`) and is
+    This is applied during sample synthesis in `QIRtoSamplesSegmentCompiler.compile(...)` and is
     also used for crest-factor phase optimisation so the optimiser sees the correct
     RF tone weights.
 

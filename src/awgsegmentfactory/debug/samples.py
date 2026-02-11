@@ -13,7 +13,7 @@ import numpy as np
 
 from ..calibration import AWGPhysicalSetupInfo
 from ..resolved_ir import ResolvedIR
-from ..synth_samples import CompiledSequenceProgram, compile_sequence_program
+from ..synth_samples import QIRtoSamplesSegmentCompiler, compile_sequence_program
 from ..synth_samples import interp_logical_channel_part
 from ..quantize import QuantizedIR, quantize_resolved_ir
 
@@ -33,7 +33,7 @@ class SegmentInstance:
 
 
 def _iter_instances_for_debug(
-    compiled: CompiledSequenceProgram,
+    compiled: QIRtoSamplesSegmentCompiler,
     *,
     wait_trig_loops: int,
     include_wrap_preview: bool,
@@ -86,7 +86,7 @@ def _iter_instances_for_debug(
 
 
 def unroll_compiled_sequence_for_debug(
-    compiled: CompiledSequenceProgram,
+    compiled: QIRtoSamplesSegmentCompiler,
     *,
     wait_trig_loops: int = 3,
     include_wrap_preview: bool = True,
@@ -140,7 +140,7 @@ def unroll_compiled_sequence_for_debug(
 
 
 def sequence_samples_debug(
-    program: ResolvedIR | QuantizedIR | CompiledSequenceProgram,
+    program: ResolvedIR | QuantizedIR | QIRtoSamplesSegmentCompiler,
     *,
     physical_setup: Optional[AWGPhysicalSetupInfo] = None,
     wait_trig_loops: int = 3,
@@ -197,9 +197,9 @@ def sequence_samples_debug(
             "`sequence_samples_debug` requires matplotlib. Install the `dev` dependency group."
         ) from exc
 
-    compiled: CompiledSequenceProgram
+    compiled: QIRtoSamplesSegmentCompiler
     q_ir: Optional[ResolvedIR] = None
-    if isinstance(program, CompiledSequenceProgram):
+    if isinstance(program, QIRtoSamplesSegmentCompiler):
         compiled = program
     elif isinstance(program, QuantizedIR):
         q_ir = program.resolved_ir
@@ -232,7 +232,7 @@ def sequence_samples_debug(
     if need_params and q_ir is None:
         raise ValueError(
             "show_param_traces=True or show_spot_grid=True requires passing a ResolvedIR/QuantizedIR "
-            "(not a CompiledSequenceProgram)"
+            "(not a QIRtoSamplesSegmentCompiler)"
         )
 
     samples, instances = unroll_compiled_sequence_for_debug(
