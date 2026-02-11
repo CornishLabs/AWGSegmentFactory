@@ -74,14 +74,14 @@ from awgsegmentfactory import (
     quantize_resolved_ir,
 )
 
-quantized = quantize_resolved_ir(
+quantised = quantize_resolved_ir(
     ir,
 )
 physical_setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0, "V": 1})
 card_max_mV = 450.0  # match your AWG channel amplitude setting
 
 compiled = compile_sequence_program(
-    quantized,
+    quantised,
     physical_setup=physical_setup,
     full_scale_mv=card_max_mV,
     full_scale=32767,
@@ -98,7 +98,7 @@ sample-synthesis stage on the GPU (resolve/quantize are still CPU).
 
 - `output="numpy"` (default): returns NumPy int16 buffers (GPU→CPU transfer once per segment).
 - `output="cupy"`: keeps int16 buffers on the GPU (useful for future RDMA workflows).
-  - To convert back to NumPy, use `compiled_sequence_slots_to_numpy(...)`.
+  - To convert back to NumPy, use `repo.to_numpy()`.
 
 For explicit slot control (including partial recompile/hot-swap):
 - `repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)`
@@ -254,7 +254,7 @@ flowchart LR
    - `resolve_intent_ir(intent, sample_rate_hz=...)` converts seconds → integer `n_samples` and produces `ResolvedIR`.
 4) **Quantise for hardware** (`src/awgsegmentfactory/quantize.py`)
    - `quantize_resolved_ir(resolved)` returns a `QuantizedIR`:
-     a quantized `ResolvedIR` plus `SegmentQuantizationInfo`.
+     a quantised `ResolvedIR` plus `SegmentQuantizationInfo`.
 5) **Samples** (`src/awgsegmentfactory/synth_samples.py`)
    - `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)` creates a slot container.
    - `repo.compile(...)` compiles all segments or a contiguous subset.
@@ -266,7 +266,7 @@ For plotting/state queries there is also a debug view:
 ## IR terminology
 
 - **Intent IR**: continuous-time spec in seconds; “what you want”.
-- **Resolved IR**: sample-quantized primitives (per-part integer sample counts); “what you mean”.
+- **Resolved IR**: sample-quantised primitives (per-part integer sample counts); “what you mean”.
 - **Quantized IR**: hardware-aligned segment lengths + optional wrap snapping; “what you can upload”.
 - **Compiled slots**: slot container with final int16 segment buffers + step table; “what the card plays”.
 

@@ -1,4 +1,4 @@
-"""Sample synthesis and quantization for AWG sequence slots.
+"""Sample synthesis and quantisation for AWG sequence slots.
 
 Primary API:
 - `QIRtoSamplesSegmentCompiler.initialise_from_quantised(...)` creates a slot container.
@@ -22,7 +22,7 @@ from .resolved_ir import ResolvedLogicalChannelPart, ResolvedSegment
 
 @dataclass(frozen=True)
 class CompiledSegment:
-    """One quantized hardware segment: int16 array per hardware channel."""
+    """One quantised hardware segment: int16 array per hardware channel."""
 
     name: str
     n_samples: int
@@ -468,13 +468,13 @@ class QIRtoSamplesSegmentCompiler:
     def __init__(
         self,
         *,
-        quantized: QuantizedIR,
+        quantised: QuantizedIR,
         physical_setup: AWGPhysicalSetupInfo,
         full_scale_mv: float,
         full_scale: int,
         clip: float = 1.0,
     ) -> None:
-        self.quantized = quantized
+        self.quantised = quantised
         self.physical_setup = physical_setup
         self.full_scale_mv = float(full_scale_mv)
         self.full_scale = int(full_scale)
@@ -487,7 +487,7 @@ class QIRtoSamplesSegmentCompiler:
         if not (0 < self.clip <= 1.0):
             raise ValueError("clip must be in (0, 1]")
 
-        q_ir = self.quantized.resolved_ir
+        q_ir = self.quantised.resolved_ir
         if not q_ir.segments:
             raise ValueError("No segments to compile")
         for logical_channel in q_ir.logical_channels:
@@ -503,14 +503,14 @@ class QIRtoSamplesSegmentCompiler:
     def initialise_from_quantised(
         cls,
         *,
-        quantized: QuantizedIR,
+        quantised: QuantizedIR,
         physical_setup: AWGPhysicalSetupInfo,
         full_scale_mv: float,
         full_scale: int,
         clip: float = 1.0,
     ) -> "QIRtoSamplesSegmentCompiler":
         return cls(
-            quantized=quantized,
+            quantised=quantised,
             physical_setup=physical_setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
@@ -519,11 +519,11 @@ class QIRtoSamplesSegmentCompiler:
 
     @property
     def sample_rate_hz(self) -> float:
-        return float(self.quantized.sample_rate_hz)
+        return float(self.quantised.sample_rate_hz)
 
     @property
     def quantization(self) -> tuple[SegmentQuantizationInfo, ...]:
-        return tuple(self.quantized.quantization)
+        return tuple(self.quantised.quantization)
 
     @property
     def steps(self) -> tuple[SequenceStep, ...]:
@@ -531,11 +531,11 @@ class QIRtoSamplesSegmentCompiler:
 
     @property
     def n_segments(self) -> int:
-        return len(self.quantized.segments)
+        return len(self.quantised.segments)
 
     @property
     def segment_names(self) -> tuple[str, ...]:
-        return tuple(str(seg.name) for seg in self.quantized.segments)
+        return tuple(str(seg.name) for seg in self.quantised.segments)
 
     @property
     def compiled_indices(self) -> tuple[int, ...]:
@@ -679,9 +679,9 @@ class QIRtoSamplesSegmentCompiler:
             known predecessor phase state raises.
         gpu / output:
             Same semantics as the old compile API:
-            - `gpu=False`: CPU synthesis + quantization.
-            - `gpu=True, output="cupy"`: GPU synthesis + quantization (CuPy buffers).
-            - `gpu=True, output="numpy"`: GPU synthesis + quantization + final copy to NumPy.
+            - `gpu=False`: CPU synthesis + quantisation.
+            - `gpu=True, output="cupy"`: GPU synthesis + quantisation (CuPy buffers).
+            - `gpu=True, output="numpy"`: GPU synthesis + quantisation + final copy to NumPy.
         """
         if output not in ("numpy", "cupy"):
             raise ValueError("output must be 'numpy' or 'cupy'")
@@ -712,7 +712,7 @@ class QIRtoSamplesSegmentCompiler:
             cp = _cupy_or_raise()
             xp = cp
 
-        q_ir = self.quantized.resolved_ir
+        q_ir = self.quantised.resolved_ir
         amp_calib: Optional[OpticalPowerToRFAmpCalib] = self.physical_setup
         n_channels = int(self.physical_setup.N_ch)
 
@@ -791,7 +791,7 @@ class QIRtoSamplesSegmentCompiler:
     def to_numpy(self) -> "QIRtoSamplesSegmentCompiler":
         """Return a copy with all compiled segment buffers on CPU/NumPy."""
         out = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
-            quantized=self.quantized,
+            quantised=self.quantised,
             physical_setup=self.physical_setup,
             full_scale_mv=self.full_scale_mv,
             full_scale=self.full_scale,
@@ -833,13 +833,6 @@ class QIRtoSamplesSegmentCompiler:
         return out
 
 
-def compiled_sequence_slots_to_numpy(
-    repo: QIRtoSamplesSegmentCompiler,
-) -> QIRtoSamplesSegmentCompiler:
-    """Convert any compiled CuPy slot buffers to NumPy."""
-    return repo.to_numpy()
-
-
 def quantise_and_normalise_voltage_for_awg(
     synthesised_mV: Any,
     *,
@@ -862,7 +855,7 @@ def quantise_and_normalise_voltage_for_awg(
 
 
 def compile_sequence_program(
-    quantized: QuantizedIR,
+    quantised: QuantizedIR,
     *,
     physical_setup: AWGPhysicalSetupInfo,
     full_scale_mv: float,
@@ -873,7 +866,7 @@ def compile_sequence_program(
 ) -> QIRtoSamplesSegmentCompiler:
     """Convenience wrapper: create slots and compile all segments."""
     repo = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
-        quantized=quantized,
+        quantised=quantised,
         physical_setup=physical_setup,
         full_scale_mv=full_scale_mv,
         full_scale=full_scale,

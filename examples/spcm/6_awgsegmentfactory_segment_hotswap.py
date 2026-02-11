@@ -55,13 +55,13 @@ def _build_hotswap_program(
     return b.build_resolved_ir(sample_rate_hz=sample_rate_hz)
 
 
-def _set_pulse_amplitude_in_quantized(
+def _set_pulse_amplitude_in_quantised(
     *,
-    quantized,
+    quantised,
     pulse_mv: float,
 ) -> None:
     """Mutate the pulse segment amplitude in-place inside a QuantizedIR object."""
-    seg = quantized.resolved_ir.segments[HOTSWAP_SEGMENT_INDEX]
+    seg = quantised.resolved_ir.segments[HOTSWAP_SEGMENT_INDEX]
     for part in seg.parts:
         pp = part.logical_channels[HOTSWAP_LOGICAL_CHANNEL]
         pp.start.amps[...] = float(pulse_mv)
@@ -132,7 +132,7 @@ def main() -> None:
         q = quantize_resolved_ir(ir, segment_quantum_s=segment_quantum_s, step_samples=64)
         setup = AWGPhysicalSetupInfo(logical_to_hardware_map={"H": 0})
         slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
-            quantized=q,
+            quantised=q,
             physical_setup=setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
@@ -149,8 +149,8 @@ def main() -> None:
         # Data-only hot-swap updates for one segment.
         try:
             for pulse_mv in pulse_values_mv[1:]:
-                _set_pulse_amplitude_in_quantized(
-                    quantized=q,
+                _set_pulse_amplitude_in_quantised(
+                    quantised=q,
                     pulse_mv=pulse_mv,
                 )
                 slots_compiler.compile(segment_indices=[HOTSWAP_SEGMENT_INDEX])

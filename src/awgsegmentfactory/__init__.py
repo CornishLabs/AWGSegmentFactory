@@ -15,7 +15,6 @@ from .synth_samples import (
     CompiledSegment,
     SequenceStep,
     compile_sequence_program,
-    compiled_sequence_slots_to_numpy,
     quantise_and_normalise_voltage_for_awg,
 )
 from .quantize import (
@@ -43,7 +42,6 @@ __all__ = [
     "SequenceStep",
     "compile_sequence_program",
     "quantise_and_normalise_voltage_for_awg",
-    "compiled_sequence_slots_to_numpy",
     "upload_sequence_program",
     "CPUUploadSession",
     "SegmentQuantizationInfo",

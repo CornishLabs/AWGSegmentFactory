@@ -7,7 +7,7 @@ from typing import Any, Literal, Sequence
 
 import numpy as np
 
-from .synth_samples import QIRtoSamplesSegmentCompiler, compiled_sequence_slots_to_numpy
+from .synth_samples import QIRtoSamplesSegmentCompiler
 
 
 UploadMode = Literal["cpu", "scapp", "auto"]
@@ -64,11 +64,11 @@ def _as_numpy_i16_segment_data(
 
 
 def _segment_lengths_from_repo(repo: QIRtoSamplesSegmentCompiler) -> tuple[int, ...]:
-    return tuple(int(seg.n_samples) for seg in repo.quantized.segments)
+    return tuple(int(seg.n_samples) for seg in repo.quantised.segments)
 
 
 def _ensure_numpy_repo(repo: QIRtoSamplesSegmentCompiler) -> QIRtoSamplesSegmentCompiler:
-    return compiled_sequence_slots_to_numpy(repo)
+    return repo.to_numpy()
 
 
 def _full_cpu_upload(

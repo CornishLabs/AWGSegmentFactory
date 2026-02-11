@@ -30,7 +30,7 @@ def _build_demo_program(
         .logical_channel("V")
         # Uncalibrated channels: amplitudes are RF voltages in mV.
         .define("init_H", logical_channel="H", freqs=[1e5], amps=[300.0], phases="auto")
-        .define("init_V", logical_channel="V", freqs=[2e5], amps=[300.0], phases="auto")
+        .define("init_V", logical_channel="V", freqs=[2e5], amps=[250.0], phases="auto")
     )
 
     # 0) Wait for trigger, output stable tones (this segment loops until a trigger event)
@@ -102,7 +102,7 @@ def main() -> None:
         # Quantize once with the card's exact DAC scaling.
         full_scale = int(card.max_sample_value()) - 1
         slots_compiler = QIRtoSamplesSegmentCompiler.initialise_from_quantised(
-            quantized=q,
+            quantised=q,
             physical_setup=physical_setup,
             full_scale_mv=full_scale_mv,
             full_scale=full_scale,
