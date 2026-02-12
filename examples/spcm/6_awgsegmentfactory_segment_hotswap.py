@@ -211,6 +211,7 @@ def main() -> None:
         )
         slots_compiler.compile_to_card_int16()
         session = upload_sequence_program(slots_compiler, mode="cpu", card=card, upload_steps=True)
+        
         print("initial full upload complete")
         print_quantization_report(slots_compiler)
 

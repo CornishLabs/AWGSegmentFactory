@@ -166,15 +166,22 @@ Debug helpers live in `awgsegmentfactory.debug` and require the `dev` dependency
 This repo includes working Spectrum examples under `examples/spcm/` (sequence mode, triggers, etc).
 Install the optional dependency group first: `uv sync --extra control-hardware`
 
-`upload_sequence_program(...)` supports CPU upload when you pass an open `spcm.Card`:
+`upload_sequence_program(...)` supports both CPU and SCAPP upload modes when you pass
+an open `spcm.Card`:
 
-- full upload:
+- CPU full upload:
   - `session = upload_sequence_program(slots_compiler, mode="cpu", card=card, upload_steps=True)`
-- data-only update (same segment lengths + same step graph):
+- CPU data-only update (same segment lengths + same step graph):
   - `upload_sequence_program(slots_compiler, mode="cpu", card=card, cpu_session=session, segment_indices=[k], upload_steps=False)`
+- SCAPP full upload (compile with `gpu=True, output="cupy"`):
+  - `session = upload_sequence_program(slots_compiler, mode="scapp", card=card, upload_steps=True)`
+- SCAPP data-only update:
+  - `upload_sequence_program(slots_compiler, mode="scapp", card=card, cpu_session=session, segment_indices=[k], upload_steps=False)`
 
 For connection/configuration flow, see `examples/spcm/6_awgsegmentfactory_sequence_upload.py`.
 For one-segment data hot-swap, see `examples/spcm/6_awgsegmentfactory_segment_hotswap.py`.
+For CPU-vs-SCAPP upload equivalence readback, see
+`examples/spcm/6_awgsegmentfactory_upload_cpu_vs_scapp_readback.py`.
 
 ### Hot-swap Footguns
 

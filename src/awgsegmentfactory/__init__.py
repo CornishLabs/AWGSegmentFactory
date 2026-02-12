@@ -25,7 +25,13 @@ from .quantize import (
     quantum_samples,
 )
 from .types import ChannelMap
-from .upload import CPUUploadSession, upload_sequence_program
+from .upload import (
+    CPUUploadSession,
+    SCAPPUploadSession,
+    UploadSession,
+    readback_sequence_segments_to_numpy,
+    upload_sequence_program,
+)
 from .phase_minimiser import minimise_crest_factor_phases, schroeder_phases_rad
 
 __all__ = [
@@ -44,6 +50,9 @@ __all__ = [
     "quantize_voltage_buffer_to_int16",
     "upload_sequence_program",
     "CPUUploadSession",
+    "SCAPPUploadSession",
+    "UploadSession",
+    "readback_sequence_segments_to_numpy",
     "SegmentQuantizationInfo",
     "format_samples_time",
     "quantize_resolved_ir",
