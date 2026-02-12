@@ -11,7 +11,7 @@ from awgsegmentfactory import AWGPhysicalSetupInfo, AWGProgramBuilder, ResolvedI
 from awgsegmentfactory.debug import LinearFreqToPos, sequence_samples_debug
 
 
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 
 def _maybe_enable_matplotlib_widget_backend() -> None:

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from awgsegmentfactory.quantize import quantize_resolved_ir
 
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 
 def main() -> None:

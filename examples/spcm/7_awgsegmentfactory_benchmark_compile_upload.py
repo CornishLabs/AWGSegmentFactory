@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from pathlib import Path
-import sys
 from time import perf_counter
 from typing import Sequence
 
@@ -34,12 +32,7 @@ from awgsegmentfactory import (
     upload_sequence_program,
 )
 
-# Allow importing `examples/sequence_repo.py` when this script is run from `examples/spcm`.
-_EXAMPLES_DIR = Path(__file__).resolve().parents[1]
-if str(_EXAMPLES_DIR) not in sys.path:
-    sys.path.insert(0, str(_EXAMPLES_DIR))
-
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 
 @dataclass(frozen=True)

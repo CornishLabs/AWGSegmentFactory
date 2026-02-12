@@ -28,7 +28,7 @@ from awgsegmentfactory.debug import (
 )
 
 
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 
 def build_demo_builder() -> AWGProgramBuilder:

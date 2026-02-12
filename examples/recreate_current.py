@@ -1,7 +1,7 @@
 from awgsegmentfactory import AWGProgramBuilder, LinearPositionToFreqCalib
 import numpy as np
 
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 fs = 625e6  # 625MHz
 ir = (

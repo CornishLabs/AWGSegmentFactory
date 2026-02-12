@@ -1,7 +1,18 @@
-from awgsegmentfactory import AWGProgramBuilder, IntentIR
+"""Reusable builder/Intent presets used by examples and tests."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+from .builder import AWGProgramBuilder
 import numpy as np
 
-def ramp_down_chirp_2ch() -> IntentIR:
+if TYPE_CHECKING:
+    from .intent_ir import IntentIR
+
+
+def ramp_down_chirp_2ch() -> AWGProgramBuilder:
     b = (
         AWGProgramBuilder()
         .logical_channel("H")
@@ -35,7 +46,7 @@ def ramp_down_chirp_2ch() -> IntentIR:
     return b
 
 
-def simple_tweens() -> IntentIR:
+def simple_tweens() -> AWGProgramBuilder:
     fs = 1e9
     one_sample = 1.0 / fs
 
@@ -113,7 +124,7 @@ def simple_tweens() -> IntentIR:
 
     return prog
 
-def recreate_mol_exp():
+def recreate_mol_exp() -> AWGProgramBuilder:
     ir = (
         AWGProgramBuilder()
         .logical_channel("H")
@@ -220,3 +231,28 @@ def recreate_mol_exp():
     )
 
     return ir
+
+
+_PRESET_BUILDERS: dict[str, Callable[[], AWGProgramBuilder]] = {
+    "ramp_down_chirp_2ch": ramp_down_chirp_2ch,
+    "simple_tweens": simple_tweens,
+    "recreate_mol_exp": recreate_mol_exp,
+}
+
+
+def available_intent_presets() -> tuple[str, ...]:
+    """Return all supported preset keys."""
+    return tuple(sorted(_PRESET_BUILDERS))
+
+
+def build_intent_preset(name_key: str) -> "IntentIR":
+    """Build an `IntentIR` from a named preset key."""
+    key = str(name_key)
+    try:
+        builder = _PRESET_BUILDERS[key]()
+    except KeyError as exc:
+        available = ", ".join(available_intent_presets())
+        raise KeyError(
+            f"Unknown IntentIR preset {key!r}. Available presets: {available}"
+        ) from exc
+    return builder.build_intent_ir()

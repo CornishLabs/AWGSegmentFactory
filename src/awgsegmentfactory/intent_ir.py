@@ -260,6 +260,17 @@ class IntentIR:
             segments=segments,
         )
 
+    @classmethod
+    def from_preset(cls, name_key: str) -> "IntentIR":
+        """
+        Build an `IntentIR` from a named preset key.
+
+        Presets live in `awgsegmentfactory.presets`.
+        """
+        from .presets import build_intent_preset
+
+        return build_intent_preset(name_key)
+
     def digest(self, *, algo: str = "sha256") -> str:
         """
         Deterministic hash of this `IntentIR` (content only).

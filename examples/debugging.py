@@ -5,7 +5,7 @@ import numpy as np
 
 from awgsegmentfactory import AWGProgramBuilder
 
-from sequence_repo import recreate_mol_exp
+from awgsegmentfactory.presets import recreate_mol_exp
 
 # In a notebook, enable the ipympl widget backend for interactive plots.
 # When run as plain Python, this is a no-op (so the file stays runnable/testable).
