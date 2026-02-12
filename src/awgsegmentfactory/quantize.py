@@ -435,6 +435,23 @@ def _snap_freqs_to_wrap(
     return k / seg_len_s
 
 
+def _max_wrap_phase_error_rad(
+    freqs_hz: np.ndarray, *, n_samples: int, sample_rate_hz: float
+) -> float:
+    """
+    Return max phase-slip error (radians) after one segment loop.
+
+    For perfect wrap closure, each tone must satisfy:
+      freq * (n_samples / sample_rate_hz) is an integer.
+    """
+    f = np.asarray(freqs_hz, dtype=float).reshape(-1)
+    if f.size == 0 or n_samples <= 0:
+        return 0.0
+    cycles = f * (float(n_samples) / float(sample_rate_hz))
+    frac = cycles - np.round(cycles)
+    return float(2.0 * np.pi * np.max(np.abs(frac)))
+
+
 def _segment_boundary_is_continuous(
     seg0: ResolvedSegment,
     seg1: ResolvedSegment,
@@ -528,6 +545,7 @@ def quantize_resolved_ir(
 
     infos: list[SegmentQuantizationInfo] = []
     out_segments: list[ResolvedSegment] = []
+    protected_wrap_segments: list[bool] = []
 
     # Track which segment boundaries were continuous in the input IR.
     boundary_continuity: list[dict[str, bool]] = []
@@ -627,7 +645,8 @@ def quantize_resolved_ir(
                 raise RuntimeError("Failed to trim segment parts correctly")
 
         # For loopable constant segments, snap freqs to wrap for the final length.
-        if loopable and constant and snap_freqs_to_wrap:
+        wrap_protected = bool(loopable and constant and snap_freqs_to_wrap)
+        if wrap_protected:
             seg_len = n1
             new_parts: list[ResolvedPart] = []
             for part in parts:
@@ -662,13 +681,19 @@ def quantize_resolved_ir(
                 snap_freqs_to_wrap=snap_freqs_to_wrap,
             )
         )
+        protected_wrap_segments.append(wrap_protected)
 
     # Preserve state-carry semantics across segment boundaries even if quantization changed
     # parameter values within a segment (e.g. wrap-snapping loopable constant freqs).
+    #
+    # Important: for wrap-protected loopable segments, preserving self-loop closure takes
+    # precedence over cross-segment continuity. So we never shift a protected segment here.
     reconciled: list[ResolvedSegment] = list(out_segments)
     for i in range(len(reconciled) - 1):
         seg0 = reconciled[i]
         seg1 = reconciled[i + 1]
+        if protected_wrap_segments[i + 1]:
+            continue
         if not seg0.parts or not seg1.parts:
             continue
         for lc in ir.logical_channels:
@@ -683,6 +708,29 @@ def quantize_resolved_ir(
                 continue
             seg1 = _shift_segment_freqs(seg1, logical_channel=lc, delta_freqs_hz=delta)
         reconciled[i + 1] = seg1
+
+    # Hard post-check: protected segments must still wrap-close after reconciliation.
+    wrap_tol_rad = 1e-6
+    for idx, seg in enumerate(reconciled):
+        if not protected_wrap_segments[idx]:
+            continue
+        seg_len = int(seg.n_samples)
+        if seg_len <= 0 or not seg.parts:
+            continue
+        for lc in ir.logical_channels:
+            for part in seg.parts:
+                pp = part.logical_channels[lc]
+                err_rad = _max_wrap_phase_error_rad(
+                    pp.start.freqs_hz,
+                    n_samples=seg_len,
+                    sample_rate_hz=fs,
+                )
+                if err_rad > wrap_tol_rad:
+                    raise RuntimeError(
+                        "Internal error: wrap-protected segment lost loop phase closure "
+                        f"after quantization for segment {seg.name!r}, logical_channel={lc!r}, "
+                        f"max_error_rad={err_rad:.3e}, n_samples={seg_len}"
+                    )
 
     q_ir = ResolvedIR(
         sample_rate_hz=fs,
