@@ -46,6 +46,30 @@ def ramp_down_chirp_2ch() -> AWGProgramBuilder:
     return b
 
 
+def spec_analyser_test() -> AWGProgramBuilder:
+    b = (
+        AWGProgramBuilder()
+        .logical_channel("H")
+        .logical_channel("V")
+        .define("init_H", logical_channel="H", freqs=[100e6,110e6], amps=[0.3,0.3], phases="auto")
+        .define("init_V", logical_channel="V", freqs=[2e5], amps=[0.3], phases="auto")
+    )
+
+    # 0) Wait for trigger, output stable tones (this segment loops until a trigger event)
+    b.segment("wait_start", mode="wait_trig")
+    b.tones("H").use_def("init_H")
+    b.tones("V").use_def("init_V")
+    b.hold(time=40e-6)
+
+    b.segment("move", mode="once")
+    b.tones("H").move(df=+1.0e6, time=100e-3, idxs=[0], kind="linear")
+
+    b.segment("wait_start_2", mode="wait_trig")
+    b.hold(time=40e-6)
+
+    return b
+
+
 def simple_tweens() -> AWGProgramBuilder:
     fs = 1e9
     one_sample = 1.0 / fs
@@ -237,6 +261,7 @@ _PRESET_BUILDERS: dict[str, Callable[[], AWGProgramBuilder]] = {
     "ramp_down_chirp_2ch": ramp_down_chirp_2ch,
     "simple_tweens": simple_tweens,
     "recreate_mol_exp": recreate_mol_exp,
+    "spec_analyser_test": spec_analyser_test
 }
 
 
