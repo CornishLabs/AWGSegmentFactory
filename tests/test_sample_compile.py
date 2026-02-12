@@ -1,4 +1,5 @@
 import unittest
+import os
 
 import numpy as np
 
@@ -54,6 +55,26 @@ def _unit_sin2_calib() -> AODSin2Calib:
         freq_max_hz=1.0,
         min_v0_sq=1e-30,
     )
+
+
+def _gpu_equivalence_test_enabled() -> tuple[bool, str]:
+    flag = os.getenv("AWGSEGMENTFACTORY_TEST_GPU_EQUIV", "").strip().lower()
+    if flag not in {"1", "true", "yes", "on"}:
+        return (
+            False,
+            "Set AWGSEGMENTFACTORY_TEST_GPU_EQUIV=1 to enable optional GPU/CPU equivalence test.",
+        )
+    try:
+        import cupy as cp  # type: ignore
+    except Exception as exc:
+        return (False, f"CuPy import failed: {exc}")
+    try:
+        n_devices = int(cp.cuda.runtime.getDeviceCount())
+    except Exception as exc:
+        return (False, f"CUDA runtime unavailable: {exc}")
+    if n_devices < 1:
+        return (False, "No CUDA devices detected.")
+    return (True, "")
 
 
 class TestSampleCompile(unittest.TestCase):
@@ -555,3 +576,95 @@ class TestSampleCompile(unittest.TestCase):
             dtype=float,
         ).reshape(-1)
         np.testing.assert_allclose(captured["amps"], expected_amps)
+
+    def test_gpu_compile_matches_cpu_within_lsb(self) -> None:
+        enabled, reason = _gpu_equivalence_test_enabled()
+        if not enabled:
+            self.skipTest(reason)
+
+        fs = 1000.0
+        n0 = 384
+        n1 = 416
+
+        st0 = LogicalChannelState(
+            freqs_hz=np.array([10.0, 27.0, 41.0], dtype=float),
+            amps=np.array([0.15, 0.08, 0.04], dtype=float),
+            phases_rad=np.array([0.2, 1.1, -0.7], dtype=float),
+        )
+        st1 = LogicalChannelState(
+            freqs_hz=np.array([13.0, 23.0, 37.0], dtype=float),
+            amps=np.array([0.1, 0.11, 0.03], dtype=float),
+            phases_rad=np.array([-0.1, 0.7, 2.0], dtype=float),
+        )
+
+        seg0 = ResolvedSegment(
+            name="s0",
+            mode="loop_n",
+            loop=1,
+            parts=(
+                ResolvedPart(
+                    n_samples=n0,
+                    logical_channels={
+                        "H": ResolvedLogicalChannelPart(
+                            start=st0,
+                            end=st1,
+                            interp=InterpSpec("linear"),
+                        ),
+                    },
+                ),
+            ),
+            phase_mode="manual",
+        )
+        seg1 = ResolvedSegment(
+            name="s1",
+            mode="loop_n",
+            loop=1,
+            parts=(
+                ResolvedPart(
+                    n_samples=n1,
+                    logical_channels={
+                        "H": ResolvedLogicalChannelPart(
+                            start=st1,
+                            end=st1,
+                            interp=InterpSpec("hold"),
+                        ),
+                    },
+                ),
+            ),
+            phase_mode="continue",
+        )
+        ir = ResolvedIR(sample_rate_hz=fs, logical_channels=("H",), segments=(seg0, seg1))
+        q = quantize_resolved_ir(ir)
+
+        kwargs = dict(
+            quantised=q,
+            physical_setup=_identity_setup(q.logical_channels),
+            full_scale_mv=1.0,
+            clip=1.0,
+            full_scale=32767,
+        )
+        cpu_repo = QIRtoSamplesSegmentCompiler(**kwargs).compile_to_card_int16(
+            gpu=False,
+            output="numpy",
+        )
+        gpu_repo = QIRtoSamplesSegmentCompiler(**kwargs).compile_to_card_int16(
+            gpu=True,
+            output="numpy",
+        )
+
+        self.assertEqual(cpu_repo.compiled_indices, gpu_repo.compiled_indices)
+        self.assertEqual(len(cpu_repo.segments), len(gpu_repo.segments))
+        for seg_cpu, seg_gpu in zip(cpu_repo.segments, gpu_repo.segments):
+            self.assertEqual(seg_cpu.name, seg_gpu.name)
+            self.assertEqual(seg_cpu.n_samples, seg_gpu.n_samples)
+            self.assertEqual(seg_cpu.data_i16.shape, seg_gpu.data_i16.shape)
+            diff = (
+                np.asarray(seg_cpu.data_i16, dtype=np.int32)
+                - np.asarray(seg_gpu.data_i16, dtype=np.int32)
+            )
+            max_abs_lsb = int(np.max(np.abs(diff)))
+            self.assertLessEqual(
+                max_abs_lsb,
+                1,
+                f"CPU/GPU mismatch exceeded 1 LSB for segment {seg_cpu.name}: {max_abs_lsb}",
+            )
