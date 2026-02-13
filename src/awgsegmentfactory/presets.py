@@ -69,6 +69,69 @@ def spec_analyser_test() -> AWGProgramBuilder:
 
     return b
 
+def rt_spec_analyser_rearr_hotswap() -> AWGProgramBuilder:
+    """
+    The low frequencies here are for use with a realtime spectrum analyser at
+    a lower sample rate
+    uv run aqctl_spectrum_awg \
+    --serial-number 14926 -vv --bind ::1 \
+    --characterisation-lookup-str AWG_2CH_MV --sample-rate 62500000 --gpu
+    """
+    b=(
+        AWGProgramBuilder()
+        .logical_channel("H")
+        .logical_channel("V")
+        .define(
+            "loading_H",
+            logical_channel="H",
+            freqs=np.linspace(20e3, 150e3, 10),
+            amps=[50] * 10,
+            phases="auto",
+        )
+        .define("loading_V", logical_channel="V", freqs=[0], amps=[0], phases="auto")
+        .define(
+            "exp_H",
+            logical_channel="H",
+            freqs=np.linspace(30e3, 100e3, 4),
+            amps=[50] * 4,
+            phases="auto",
+        )
+        .define("exp_V", logical_channel="V", freqs=[100e6], amps=[0.7], phases="auto")
+        # 1) Initial sync: minimum length, wait for first trigger
+        .segment("sync", mode="wait_trig", snap_len_to_quantum=False)
+            .hold(
+                time=1e-9
+            )  # wait_trig defaults: wrap-snap freqs; snap_len_to_quantum=False keeps trigger latency minimal
+        # 2) Loading tweezers on: wait for trigger then output steady tones
+        .segment("loading_tweezers_on", mode="wait_trig", phase_mode="optimise")
+            .tones("H")
+            .use_def("loading_H")
+            .tones("V")
+            .use_def("loading_V")
+            .hold(
+                time=400e-6
+            )
+        # 3) Rearrange (hotswappable): only H changes (V implicitly unchanged)
+        #
+        # This is *not* a “move(df=...)” — it’s a remapping/re-targeting operation:
+        # “Take selected existing tones, map them onto the target definition ordering,
+        #  dropping extras, and tween over time with a chosen curve.”
+        .segment("hotswap_rearrange_to_exp_array", mode="loop_n", loop=1, phase_mode="continue")
+            .tones("H")
+            .remap_from_def(
+                target_def="exp_H",
+                src=[2, 4, 8, 9],
+                dst="all",
+                time=2.5e-3, 
+                kind="min_jerk",
+            )
+        # 5) Wait for trigger: wrap-continuous quantised hold
+        .segment("wait_for_trigger_A", mode="wait_trig")
+            .hold(time=40e-6)
+    )
+
+    return b
+
 
 def simple_tweens() -> AWGProgramBuilder:
     fs = 1e9
@@ -261,7 +324,8 @@ _PRESET_BUILDERS: dict[str, Callable[[], AWGProgramBuilder]] = {
     "ramp_down_chirp_2ch": ramp_down_chirp_2ch,
     "simple_tweens": simple_tweens,
     "recreate_mol_exp": recreate_mol_exp,
-    "spec_analyser_test": spec_analyser_test
+    "spec_analyser_test": spec_analyser_test,
+    "rt_spec_analyser_rearr_hotswap": rt_spec_analyser_rearr_hotswap
 }
 
 
