@@ -51,8 +51,8 @@ def spec_analyser_test() -> AWGProgramBuilder:
         AWGProgramBuilder()
         .logical_channel("H")
         .logical_channel("V")
-        .define("init_H", logical_channel="H", freqs=[100e6,110e6], amps=[0.3,0.3], phases="auto")
-        .define("init_V", logical_channel="V", freqs=[2e5], amps=[0.3], phases="auto")
+        .define("init_H", logical_channel="H", freqs=[1e5], amps=[0.5], phases="auto")
+        .define("init_V", logical_channel="V", freqs=[2e4], amps=[0.5], phases="auto")
     )
 
     # 0) Wait for trigger, output stable tones (this segment loops until a trigger event)
@@ -62,7 +62,7 @@ def spec_analyser_test() -> AWGProgramBuilder:
     b.hold(time=40e-6)
 
     b.segment("move", mode="once")
-    b.tones("H").move(df=+1.0e6, time=100e-3, idxs=[0], kind="linear")
+    b.tones("H").move(df=+1e5, time=100e-3, idxs=[0], kind="linear")
 
     b.segment("wait_start_2", mode="wait_trig")
     b.hold(time=40e-6)
